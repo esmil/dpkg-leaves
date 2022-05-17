@@ -97,44 +97,6 @@ bitmap_empty(const unsigned long *bitmap, int len)
   return true;
 }
 
-static int
-bitmap_count(const unsigned long *bitmap, int len)
-{
-  int end = bitmap_end(len);
-  int ret = 0;
-  int i;
-
-  for (i = 0; i < end; i++)
-    ret += __builtin_popcountl(bitmap[i]);
-  return ret;
-}
-
-static void
-bitmap_subtract(unsigned long *bitmap, const unsigned long *other, int len)
-{
-  int end = bitmap_end(len);
-  int i;
-
-  for (i = 0; i < end; i++)
-    bitmap[i] &= ~other[i];
-}
-
-static int *
-bitmap_to_array(const unsigned long *bitmap, int len)
-{
-  int *ret = m_malloc((bitmap_count(bitmap, len) + 1) * sizeof(ret[0]));
-  int end = bitmap_end(len);
-  unsigned long v;
-  int i, j;
-
-  for (i = 0, j = 0; i < end; i++) {
-    for (v = bitmap[i]; v; v &= v - 1)
-      ret[j++] = i * BITS_PER_LONG + __builtin_ctzl(v);
-  }
-  ret[j] = -1;
-  return ret;
-}
-
 static void
 bitmap_clear(unsigned long *bitmap, int len)
 {
@@ -399,7 +361,6 @@ graph_reverse(struct graph *rgraph, const struct graph *graph)
     for (j = *edges++; j >= 0; j = *edges++)
       rgraph->edges[j] += 1;
   }
-
   for (i = 0, j = rgraph->n_nodes; i < rgraph->n_nodes; i++) {
     int len = rgraph->edges[i] + 1;
     rgraph->edges[i] = j;
@@ -442,14 +403,29 @@ leaves_destroy(struct leaves *leaves)
   free(leaves->sccs);
 }
 
-static void
-leaves_add(struct leaves *leaves, int *scc)
+static int
+int_sorter_ascending(const void *a, const void *b)
 {
+  const int *x = a;
+  const int *y = b;
+
+  return *x - *y;
+}
+
+static void
+leaves_add(struct leaves *leaves, const int *scc, int len)
+{
+  int *entry = m_malloc((len + 1) * sizeof(entry[0]));
+
+  memcpy(entry, scc, len * sizeof(entry[0]));
+  qsort(entry, len, sizeof(entry[0]), int_sorter_ascending);
+  entry[len] = -1;
+
   if (leaves->n_sccs + 1 >= leaves->cap_sccs) {
     leaves->cap_sccs *= 2;
     leaves->sccs = m_realloc(leaves->sccs, leaves->cap_sccs * sizeof(leaves->sccs[0]));
   }
-  leaves->sccs[leaves->n_sccs++] = scc;
+  leaves->sccs[leaves->n_sccs++] = entry;
 }
 
 static void
@@ -471,7 +447,6 @@ static void DPKG_ATTR_UNUSED
 naive_leaves(struct leaves *leaves, const struct graph *graph)
 {
   int *incoming = m_calloc(graph->n_nodes, sizeof(incoming[0]));
-  int *leaf;
   int u, v;
 
   for (u = 0; u < graph->n_nodes; u++) {
@@ -483,13 +458,8 @@ naive_leaves(struct leaves *leaves, const struct graph *graph)
 
   leaves_init(leaves);
   for (u = 0; u < graph->n_nodes; u++) {
-    if (incoming[u])
-      continue;
-
-    leaf = m_malloc(2 * sizeof(leaf[0]));
-    leaf[0] = u;
-    leaf[1] = -1;
-    leaves_add(leaves, leaf);
+    if (incoming[u] == 0)
+      leaves_add(leaves, &u, 1);
   }
 
   free(incoming);
@@ -502,13 +472,11 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
   int N = graph->n_nodes;
   int *rstack = m_malloc(N * sizeof(rstack[0]));
   int *stack = m_malloc(N * sizeof(stack[0]));
-  int *eidx = m_calloc(N, sizeof(eidx[0]));
   unsigned long *tag = bitmap_new(N);
-  unsigned long *scc;
   unsigned long *sccredges;
-  int rtop = 0;
   int top = 0;
-  int i;
+  int r = N;
+  int i, j, u, v;
 
   /*
    * do depth-first searches in the graph and push nodes to rstack
@@ -519,28 +487,28 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
     if (bitmap_has(tag, i))
       continue;
 
-    stack[top++] = i;
-    bitmap_setbit(tag, i);
-    while (top) {
-      int u = stack[top - 1];
-      int j = eidx[top - 1];
-      int v = graph_edges_from(graph, u)[j];
-
-      if (v < 0) {
-        eidx[--top] = 0;
-        rstack[rtop++] = u;
-        continue;
+    u = i;
+    j = 0;
+    bitmap_setbit(tag, u);
+    while (true) {
+      v = graph_edges_from(graph, u)[j++];
+      if (v >= 0) {
+        if (!bitmap_has(tag, v)) {
+          rstack[top] = j;
+          stack[top++] = u;
+          u = v;
+          j = 0;
+          bitmap_setbit(tag, u);
+        }
+      } else {
+        rstack[--r] = u;
+        if (!top)
+          break;
+        u = stack[--top];
+        j = rstack[top];
       }
-
-      eidx[top - 1] = j + 1;
-      if (bitmap_has(tag, v))
-        continue;
-
-      stack[top++] = v;
-      bitmap_setbit(tag, v);
     }
   }
-  free(eidx);
 
   /*
    * now searches beginning at nodes popped from rstack in the graph with all
@@ -553,45 +521,42 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
    * if there are no such incoming edges the component is a leaf and we
    * add it to the array of leaves.
    */
-  graph_reverse(&rgraph, graph);
-  scc = bitmap_new(N);
   sccredges = bitmap_new(N);
+  graph_reverse(&rgraph, graph);
   leaves_init(leaves);
-  while (rtop) {
-    i = rstack[--rtop];
-    if (!bitmap_has(tag, i))
+  for (; r < N; r++) {
+    u = rstack[r];
+    if (!bitmap_has(tag, u))
       continue;
 
-    stack[top++] = i;
-    bitmap_clearbit(tag, i);
+    stack[top++] = u;
+    bitmap_clearbit(tag, u);
+    j = N;
     while (top) {
-      int u = stack[--top];
-      const int *redges = graph_edges_from(&rgraph, u);
-      int v;
+      const int *redges;
 
-      bitmap_setbit(scc, u);
+      u = stack[--j] = stack[--top];
+      redges = graph_edges_from(&rgraph, u);
       for (v = *redges++; v >= 0; v = *redges++) {
         bitmap_setbit(sccredges, v);
-        if (!bitmap_has(tag, v))
-          continue;
-
-        stack[top++] = v;
-        bitmap_clearbit(tag, v);
+        if (bitmap_has(tag, v)) {
+          stack[top++] = v;
+          bitmap_clearbit(tag, v);
+        }
       }
     }
 
-    bitmap_subtract(sccredges, scc, N);
+    for (i = j; i < N; i++)
+      bitmap_clearbit(sccredges, stack[i]);
+
     if (bitmap_empty(sccredges, N))
-      leaves_add(leaves, bitmap_to_array(scc, N));
+      leaves_add(leaves, &stack[j], N - j);
     else
       bitmap_clear(sccredges, N);
-
-    bitmap_clear(scc, N);
   }
 
-  bitmap_free(sccredges);
-  bitmap_free(scc);
   graph_destroy(&rgraph);
+  bitmap_free(sccredges);
   bitmap_free(tag);
   free(stack);
   free(rstack);

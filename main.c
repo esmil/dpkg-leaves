@@ -46,6 +46,7 @@ static inline void dpkg_locales_done(void) {}
 static const char *admindir;
 static const char *instdir;
 static int leavespriority;
+static int leavesedges = 2;
 static const char *leavesformat = "${binary:Package;-35} ${Priority;-10} ${Version}\n";
 
 static inline int
@@ -168,6 +169,20 @@ dep_sorter_by_pointer(const void *a, const void *b)
   return (x < y) ? -1 : (x > y);
 }
 
+static bool
+dep_is_valid_graph_edge(struct dependency *dep)
+{
+  static const enum deptype edgetypes[] = { dep_depends, dep_predepends, dep_recommends };
+  enum deptype type = dep->type;
+  int i;
+
+  for (i = 0; i < leavesedges; i++) {
+    if (type == edgetypes[i])
+      return true;
+  }
+  return false;
+}
+
 static struct pkginfo *
 pkg_installed_provider(struct pkginfo *pkg)
 {
@@ -257,7 +272,7 @@ graph_build_rdepends(struct graph *graph, struct pkg_array *array)
       break;
 
     for (dep = pkg->installed.depends; dep; dep = dep->next) {
-      if (dep->type == dep_predepends || dep->type == dep_depends)
+      if (dep_is_valid_graph_edge(dep))
         deparray.n_deps += 1;
     }
   }
@@ -268,7 +283,7 @@ graph_build_rdepends(struct graph *graph, struct pkg_array *array)
     struct dependency *dep;
 
     for (dep = array->pkgs[i]->installed.depends; dep; dep = dep->next) {
-      if (dep->type == dep_predepends || dep->type == dep_depends)
+      if (dep_is_valid_graph_edge(dep))
         deparray.deps[j++] = dep;
     }
   }
@@ -296,7 +311,7 @@ graph_build_rdepends(struct graph *graph, struct pkg_array *array)
     for (possi = pkg->set->depended.installed; possi; possi = possi->rev_next) {
       struct dependency *dep = possi->up;
 
-      if (dep->type != dep_depends && dep->type != dep_predepends)
+      if (!dep_is_valid_graph_edge(dep))
         continue;
 
       j = dep_array_index_of(&deparray, dep);
@@ -721,6 +736,12 @@ set_priority(const struct cmdinfo *ci, const char *value)
   leavespriority = v;
 }
 
+static void
+set_recommends(const struct cmdinfo *ci, const char *value)
+{
+  leavesedges = 3;
+}
+
 static void DPKG_ATTR_NORET
 printversion(const struct cmdinfo *ci, const char *value)
 {
@@ -754,6 +775,7 @@ usage(const struct cmdinfo *ci, const char *value)
 "  --root=<directory>               Use <directory> instead of %s.\n"
 "  --no-pager                       Disables the use of any pager.\n"
 "  -p|--priority=<priority>         Show only packages with this priority or higher.\n"
+"  -r|--recommends                  Treat recommends as dependencies.\n"
 "  -f|--format=<format>             Use alternative format.\n"
 "\n"), dpkg_db_get_dir(), "/");
 
@@ -774,13 +796,14 @@ usage(const struct cmdinfo *ci, const char *value)
 static const char printforhelp[] = N_("Use --help for help.");
 
 static const struct cmdinfo cmdinfos[]= {
-  { "admindir",      0,  1,  NULL,  &admindir,      NULL,          0,  NULL,  NULL },
-  { "root",          0,  1,  NULL,  NULL,           set_root,      0,  NULL,  NULL },
-  { "no-pager",      0,  0,  NULL,  NULL,           set_no_pager,  0,  NULL,  NULL },
-  { "priority",    'p',  1,  NULL,  NULL,           set_priority,  0,  NULL,  NULL },
-  { "format",      'f',  1,  NULL,  &leavesformat,  NULL,          0,  NULL,  NULL },
-  { "help",        '?',  0,  NULL,  NULL,           usage,         0,  NULL,  NULL },
-  { "version",       0,  0,  NULL,  NULL,           printversion,  0,  NULL,  NULL },
+  { "admindir",      0,  1,  NULL,  &admindir,      NULL,            0,  NULL,  NULL },
+  { "root",          0,  1,  NULL,  NULL,           set_root,        0,  NULL,  NULL },
+  { "no-pager",      0,  0,  NULL,  NULL,           set_no_pager,    0,  NULL,  NULL },
+  { "priority",    'p',  1,  NULL,  NULL,           set_priority,    0,  NULL,  NULL },
+  { "recommends",  'r',  0,  NULL,  NULL,           set_recommends,  0,  NULL,  NULL },
+  { "format",      'f',  1,  NULL,  &leavesformat,  NULL,            0,  NULL,  NULL },
+  { "help",        '?',  0,  NULL,  NULL,           usage,           0,  NULL,  NULL },
+  { "version",       0,  0,  NULL,  NULL,           printversion,    0,  NULL,  NULL },
   {  /* sentinel */ }
 };
 

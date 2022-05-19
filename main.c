@@ -198,7 +198,7 @@ dep_array_index_of(struct dep_array *array, struct dependency *dep)
 }
 
 static int
-dep_compare_pointers(const void *a, const void *b)
+dep_sorter_by_pointer(const void *a, const void *b)
 {
   const struct dependency *x = *(const struct dependency *const *)a;
   const struct dependency *y = *(const struct dependency *const *)b;
@@ -241,7 +241,7 @@ struct edge {
 };
 
 static int
-compare_edges(const void *a, const void *b)
+edge_sorter_by_nodes(const void *a, const void *b)
 {
   const struct edge *x = a;
   const struct edge *y = b;
@@ -305,7 +305,7 @@ graph_build(struct graph *graph, struct pkg_array *array)
         deparray.deps[j++] = dep;
     }
   }
-  qsort(deparray.deps, deparray.n_deps, sizeof(deparray.deps[0]), dep_compare_pointers);
+  qsort(deparray.deps, deparray.n_deps, sizeof(deparray.deps[0]), dep_sorter_by_pointer);
 
   edges = m_malloc(deparray.n_deps * sizeof(edges[0]));
   for (i = 0; i < deparray.n_deps; i++) {
@@ -339,7 +339,7 @@ graph_build(struct graph *graph, struct pkg_array *array)
     }
   }
 
-  qsort(edges, deparray.n_deps, sizeof(edges[0]), compare_edges);
+  qsort(edges, deparray.n_deps, sizeof(edges[0]), edge_sorter_by_nodes);
 
   graph->n_nodes = n_installed;
   for (i = 0, j = 0; i < deparray.n_deps; i++) {
@@ -447,6 +447,15 @@ static void
 leaves_sort(struct leaves *leaves, int (*compare)(const void *, const void *))
 {
   qsort(leaves->sccs, leaves->n_sccs, sizeof(leaves->sccs[0]), compare);
+}
+
+static int
+leaves_sorter_by_first_node(const void *a, const void *b)
+{
+  const int *const *x = a;
+  const int *const *y = b;
+
+  return x[0][0] - y[0][0];
 }
 
 static void DPKG_ATTR_UNUSED
@@ -580,15 +589,6 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
 }
 
 static int
-compare_first(const void *a, const void *b)
-{
-  const int *const *x = a;
-  const int *const *y = b;
-
-  return x[0][0] - y[0][0];
-}
-
-static int
 showleaves(void)
 {
   struct dpkg_error err;
@@ -612,7 +612,7 @@ showleaves(void)
   pkg_array_init_from_hash(&array);
   graph_build(&graph, &array);
   kosaraju(&leaves, &graph);
-  leaves_sort(&leaves, compare_first);
+  leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   pager = pager_spawn(_("showing leaves list on pager"));
 

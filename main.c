@@ -456,7 +456,7 @@ naive_leaves(struct leaves *leaves, const struct graph *rgraph)
   }
 }
 
-static void
+static void DPKG_ATTR_UNUSED
 kosaraju(struct leaves *leaves, const struct graph *rgraph)
 {
   struct graph graph;
@@ -554,6 +554,89 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph)
   free(rstack);
 }
 
+static void
+tarjan(struct leaves *leaves, const struct graph *rgraph)
+{
+  int N = rgraph->n_nodes;
+  int *stack = m_malloc(N * sizeof(stack[0]));
+  int *estack = m_malloc(N * sizeof(estack[0]));
+  int *rindex = m_calloc(N, sizeof(rindex[0]));
+  unsigned long *nonroot = bitmap_new(N);
+  unsigned long *sccredges = bitmap_new(N);
+  int r = N;
+  int idx = 0;
+  int top = 0;
+  int i, j, u, v;
+
+  leaves_init(leaves);
+
+  for (i = 0; i < N; i++) {
+    if (rindex[i])
+      continue;
+
+    u = i;
+    j = 0;
+    rindex[u] = ++idx;
+    while (true) {
+      v = graph_edges_from(rgraph, u)[j++];
+      if (v >= 0) {
+        if (!rindex[v]) {
+          estack[top] = j;
+          stack[top++] = u;
+          u = v;
+          j = 0;
+          rindex[u] = ++idx;
+        } else if (rindex[v] < rindex[u]) {
+          rindex[u] = rindex[v];
+          bitmap_setbit(nonroot, u);
+        }
+        continue;
+      }
+
+      stack[--r] = u;
+      if (!bitmap_has(nonroot, u)) {
+        int uidx = rindex[u];
+        int scc = r;
+
+        do {
+          const int *edges;
+          int w;
+
+          v = stack[r++];
+          rindex[v] = N;
+          edges = graph_edges_from(rgraph, v);
+          for (w = *edges++; w >= 0; w = *edges++)
+            bitmap_setbit(sccredges, w);
+        } while (r < N && uidx <= rindex[stack[r]]);
+
+        for (j = scc; j < r; j++)
+          bitmap_clearbit(sccredges, stack[j]);
+
+        if (bitmap_empty(sccredges, N))
+          leaves_add(leaves, &stack[scc], r - scc);
+        else
+          bitmap_clear(sccredges, N);
+      }
+
+      if (!top)
+        break;
+      v = u;
+      u = stack[--top];
+      j = estack[top];
+      if (rindex[v] < rindex[u]) {
+        rindex[u] = rindex[v];
+        bitmap_setbit(nonroot, u);
+      }
+    }
+  }
+
+  bitmap_free(sccredges);
+  bitmap_free(nonroot);
+  free(rindex);
+  free(estack);
+  free(stack);
+}
+
 static int
 showleaves(void)
 {
@@ -577,7 +660,7 @@ showleaves(void)
   modstatdb_open(msdbrw_readonly);
   pkg_array_init_from_hash(&array);
   graph_build_rdepends(&rgraph, &array);
-  kosaraju(&leaves, &rgraph);
+  tarjan(&leaves, &rgraph);
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   pager = pager_spawn(_("showing leaves list on pager"));

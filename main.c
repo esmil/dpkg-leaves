@@ -239,7 +239,7 @@ graph_edges_from(const struct graph *graph, int u)
 }
 
 static void
-graph_build(struct graph *graph, struct pkg_array *array)
+graph_build_rdepends(struct graph *graph, struct pkg_array *array)
 {
   struct dep_array deparray;
   struct edge *edges;
@@ -276,8 +276,8 @@ graph_build(struct graph *graph, struct pkg_array *array)
 
   edges = m_malloc((deparray.n_deps + 1) * sizeof(edges[0]));
   for (i = 0; i < deparray.n_deps; i++) {
-    edges[i].u = pkg_array_index_of(array, deparray.deps[i]->up);
-    edges[i].v = -1;
+    edges[i].u = -1;
+    edges[i].v = pkg_array_index_of(array, deparray.deps[i]->up);
   }
   edges[i].u = -1;
   edges[i].v = -1;
@@ -286,12 +286,12 @@ graph_build(struct graph *graph, struct pkg_array *array)
     struct pkginfo *pkg = array->pkgs[i];
     struct pkginfo *ppkg = pkg_installed_provider(pkg);
     struct deppossi *possi;
-    int v;
+    int u;
 
     if (!ppkg)
       continue;
 
-    v = (ppkg == MULTIPLE_PROVIDERS) ? -2 : pkg_array_index_of(array, ppkg);
+    u = (ppkg == MULTIPLE_PROVIDERS) ? -2 : pkg_array_index_of(array, ppkg);
 
     for (possi = pkg->set->depended.installed; possi; possi = possi->rev_next) {
       struct dependency *dep = possi->up;
@@ -303,10 +303,10 @@ graph_build(struct graph *graph, struct pkg_array *array)
       if (j < 0)
         continue;
 
-      if (edges[j].v == -1)
-        edges[j].v = v;
-      else if (edges[j].v != v)
-        edges[j].v = -2;
+      if (edges[j].u == -1)
+        edges[j].u = u;
+      else if (edges[j].u != u)
+        edges[j].u = -2;
     }
   }
 
@@ -444,32 +444,23 @@ leaves_sorter_by_first_node(const void *a, const void *b)
 }
 
 static void DPKG_ATTR_UNUSED
-naive_leaves(struct leaves *leaves, const struct graph *graph)
+naive_leaves(struct leaves *leaves, const struct graph *rgraph)
 {
-  int *incoming = m_calloc(graph->n_nodes, sizeof(incoming[0]));
-  int u, v;
-
-  for (u = 0; u < graph->n_nodes; u++) {
-    const int *edges = graph_edges_from(graph, u);
-
-    for (v = *edges++; v >= 0; v = *edges++)
-      incoming[v] += 1;
-  }
+  int u;
 
   leaves_init(leaves);
-  for (u = 0; u < graph->n_nodes; u++) {
-    if (incoming[u] == 0)
+
+  for (u = 0; u < rgraph->n_nodes; u++) {
+    if (graph_edges_from(rgraph, u)[0] < 0)
       leaves_add(leaves, &u, 1);
   }
-
-  free(incoming);
 }
 
 static void
-kosaraju(struct leaves *leaves, const struct graph *graph)
+kosaraju(struct leaves *leaves, const struct graph *rgraph)
 {
-  struct graph rgraph;
-  int N = graph->n_nodes;
+  struct graph graph;
+  int N = rgraph->n_nodes;
   int *rstack = m_malloc(N * sizeof(rstack[0]));
   int *stack = m_malloc(N * sizeof(stack[0]));
   unsigned long *tag = bitmap_new(N);
@@ -477,6 +468,8 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
   int top = 0;
   int r = N;
   int i, j, u, v;
+
+  graph_reverse(&graph, rgraph);
 
   /*
    * do depth-first searches in the graph and push nodes to rstack
@@ -491,7 +484,7 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
     j = 0;
     bitmap_setbit(tag, u);
     while (true) {
-      v = graph_edges_from(graph, u)[j++];
+      v = graph_edges_from(&graph, u)[j++];
       if (v >= 0) {
         if (!bitmap_has(tag, v)) {
           rstack[top] = j;
@@ -509,6 +502,7 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
       }
     }
   }
+  graph_destroy(&graph);
 
   /*
    * now searches beginning at nodes popped from rstack in the graph with all
@@ -522,7 +516,6 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
    * add it to the array of leaves.
    */
   sccredges = bitmap_new(N);
-  graph_reverse(&rgraph, graph);
   leaves_init(leaves);
   for (; r < N; r++) {
     u = rstack[r];
@@ -536,7 +529,7 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
       const int *redges;
 
       u = stack[--j] = stack[--top];
-      redges = graph_edges_from(&rgraph, u);
+      redges = graph_edges_from(rgraph, u);
       for (v = *redges++; v >= 0; v = *redges++) {
         bitmap_setbit(sccredges, v);
         if (bitmap_has(tag, v)) {
@@ -555,7 +548,6 @@ kosaraju(struct leaves *leaves, const struct graph *graph)
       bitmap_clear(sccredges, N);
   }
 
-  graph_destroy(&rgraph);
   bitmap_free(sccredges);
   bitmap_free(tag);
   free(stack);
@@ -567,7 +559,7 @@ showleaves(void)
 {
   struct dpkg_error err;
   struct pkg_array array;
-  struct graph graph;
+  struct graph rgraph;
   struct leaves leaves;
   struct pkg_format_node *fmt;
   struct pager *pager;
@@ -584,8 +576,8 @@ showleaves(void)
 
   modstatdb_open(msdbrw_readonly);
   pkg_array_init_from_hash(&array);
-  graph_build(&graph, &array);
-  kosaraju(&leaves, &graph);
+  graph_build_rdepends(&rgraph, &array);
+  kosaraju(&leaves, &rgraph);
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   pager = pager_spawn(_("showing leaves list on pager"));
@@ -615,7 +607,7 @@ showleaves(void)
   pager_reap(pager);
 
   leaves_destroy(&leaves);
-  graph_destroy(&graph);
+  graph_destroy(&rgraph);
   pkg_array_destroy(&array);
   modstatdb_shutdown();
   pkg_format_free(fmt);

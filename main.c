@@ -241,12 +241,17 @@ struct edge {
 };
 
 static int
-edge_sorter_by_nodes(const void *a, const void *b)
+edge_sorter_by_nodes_invalid_last(const void *a, const void *b)
 {
   const struct edge *x = a;
   const struct edge *y = b;
-  int ret = x->u - y->u;
+  int ret;
 
+  ret = (int)(x->u < 0 || x->v < 0) - (int)(y->u < 0 || y->v < 0);
+  if (ret)
+    return ret;
+
+  ret = x->u - y->u;
   if (ret)
     return ret;
 
@@ -307,11 +312,13 @@ graph_build(struct graph *graph, struct pkg_array *array)
   }
   qsort(deparray.deps, deparray.n_deps, sizeof(deparray.deps[0]), dep_sorter_by_pointer);
 
-  edges = m_malloc(deparray.n_deps * sizeof(edges[0]));
+  edges = m_malloc((deparray.n_deps + 1) * sizeof(edges[0]));
   for (i = 0; i < deparray.n_deps; i++) {
     edges[i].u = pkg_array_index_of(array, deparray.deps[i]->up);
     edges[i].v = -1;
   }
+  edges[i].u = -1;
+  edges[i].v = -1;
 
   for (i = 0; i < array->n_pkgs; i++) {
     struct pkginfo *pkg = array->pkgs[i];
@@ -326,34 +333,36 @@ graph_build(struct graph *graph, struct pkg_array *array)
 
     for (possi = pkg->set->depended.installed; possi; possi = possi->rev_next) {
       struct dependency *dep = possi->up;
-      struct edge *edge;
 
       if (dep->type != dep_depends && dep->type != dep_predepends)
         continue;
 
-      edge = &edges[dep_array_index_of(&deparray, dep)];
-      if (edge->v != -1 && edge->v != v)
-        edge->v = -2;
-      else
-        edge->v = v;
+      j = dep_array_index_of(&deparray, dep);
+      if (j < 0)
+        continue;
+
+      if (edges[j].v == -1)
+        edges[j].v = v;
+      else if (edges[j].v != v)
+        edges[j].v = -2;
     }
   }
 
-  qsort(edges, deparray.n_deps, sizeof(edges[0]), edge_sorter_by_nodes);
+  qsort(edges, deparray.n_deps + 1, sizeof(edges[0]), edge_sorter_by_nodes_invalid_last);
 
   graph->n_nodes = n_installed;
-  for (i = 0, j = 0; i < deparray.n_deps; i++) {
-    if (edges[i].v >= 0 && (j == 0 || memcmp(&edges[i], &edges[i - 1], sizeof(edges[0]))))
-      j += 1;
+  graph->n_edges = 0;
+  for (i = 0; edges[i].u >= 0; i++) {
+    if (edges[i].v != edges[i + 1].v || edges[i].u != edges[i + 1].u)
+      graph->n_edges += 1;
   }
-  graph->n_edges = j;
-  graph->edges = m_calloc(2 * graph->n_nodes + graph->n_edges, sizeof(graph->edges[0]));
+  graph->edges = m_malloc((2 * graph->n_nodes + graph->n_edges) * sizeof(graph->edges[0]));
 
   for (i = 0, j = 0, k = graph->n_nodes; i < graph->n_nodes; i++) {
     graph->edges[i] = k;
-    for (; j < deparray.n_deps && edges[j].u == i; j++) {
-      if (edges[j].v >= 0 && (j == 0 || memcmp(&edges[j], &edges[j - 1], sizeof(edges[0]))))
-        graph->edges[k++] += edges[j].v;
+    for (; edges[j].u == i; j++) {
+      if (edges[j].v != edges[j + 1].v || edges[j].u != edges[j + 1].u)
+        graph->edges[k++] = edges[j].v;
     }
     graph->edges[k++] = -1;
   }
@@ -369,8 +378,8 @@ graph_build(struct graph *graph, struct pkg_array *array)
   }
   */
 
-  dep_array_destroy(&deparray);
   free(edges);
+  dep_array_destroy(&deparray);
 }
 
 static void

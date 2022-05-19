@@ -27,7 +27,7 @@ property that removing anything from the system must include at least one
 package from the list:
 
 - **Case 1:** The *debhelper* package depends on *dh-autoreconf* which depends
-  on *dephelper* in a cycle. This means once *dephelper* (or *dh-autoreconf*)
+  on *debhelper* in a cycle. This means once *debhelper* (or *dh-autoreconf*)
   is installed none of these packages would show up on the list even if nothing
   else depends on them and they can be safely uninstalled.
 - **Case 2:** The *base-files* package pre-depends on *awk* which is provided

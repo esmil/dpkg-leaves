@@ -459,11 +459,13 @@ leaves_sorter_by_first_node(const void *a, const void *b)
 }
 
 static void DPKG_ATTR_UNUSED
-naive_leaves(struct leaves *leaves, const struct graph *rgraph)
+naive_leaves(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
   int u;
 
   leaves_init(leaves);
+  if (allcycles)
+    return;
 
   for (u = 0; u < rgraph->n_nodes; u++) {
     if (graph_edges_from(rgraph, u)[0] < 0)
@@ -472,7 +474,7 @@ naive_leaves(struct leaves *leaves, const struct graph *rgraph)
 }
 
 static void DPKG_ATTR_UNUSED
-kosaraju(struct leaves *leaves, const struct graph *rgraph)
+kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
   struct graph graph;
   int N = rgraph->n_nodes;
@@ -554,13 +556,18 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph)
       }
     }
 
-    for (i = j; i < N; i++)
-      bitmap_clearbit(sccredges, stack[i]);
+    if (!allcycles) {
+      for (i = j; i < N; i++)
+        bitmap_clearbit(sccredges, stack[i]);
 
-    if (bitmap_empty(sccredges, N))
-      leaves_add(leaves, &stack[j], N - j);
-    else
-      bitmap_clear(sccredges, N);
+      if (bitmap_empty(sccredges, N))
+        leaves_add(leaves, &stack[j], N - j);
+      else
+        bitmap_clear(sccredges, N);
+    } else {
+      if (N - j > 1)
+        leaves_add(leaves, &stack[j], N - j);
+    }
   }
 
   bitmap_free(sccredges);
@@ -570,7 +577,7 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph)
 }
 
 static void
-tarjan(struct leaves *leaves, const struct graph *rgraph)
+tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
   int N = rgraph->n_nodes;
   int *stack = m_malloc(N * sizeof(stack[0]));
@@ -623,13 +630,18 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
             bitmap_setbit(sccredges, w);
         } while (r < N && uidx <= rindex[stack[r]]);
 
-        for (j = scc; j < r; j++)
-          bitmap_clearbit(sccredges, stack[j]);
+        if (!allcycles) {
+          for (j = scc; j < r; j++)
+            bitmap_clearbit(sccredges, stack[j]);
 
-        if (bitmap_empty(sccredges, N))
-          leaves_add(leaves, &stack[scc], r - scc);
-        else
-          bitmap_clear(sccredges, N);
+          if (bitmap_empty(sccredges, N))
+            leaves_add(leaves, &stack[scc], r - scc);
+          else
+            bitmap_clear(sccredges, N);
+        } else {
+          if (r - scc > 1)
+            leaves_add(leaves, &stack[scc], r - scc);
+        }
       }
 
       if (!top)
@@ -649,7 +661,7 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
 }
 
 static int
-showleaves(void)
+showsccs(bool allcycles)
 {
   struct dpkg_error err;
   struct pkg_array array;
@@ -671,7 +683,7 @@ showleaves(void)
   modstatdb_open(msdbrw_readonly);
   pkg_array_init_from_hash(&array);
   graph_build_rdepends(&rgraph, &array);
-  tarjan(&leaves, &rgraph);
+  tarjan(&leaves, &rgraph, allcycles);
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   pager = pager_spawn(_("showing leaves list on pager"));
@@ -706,6 +718,24 @@ showleaves(void)
   modstatdb_shutdown();
   pkg_format_free(fmt);
   return 0;
+}
+
+static int
+showcycles(const char *const *argv)
+{
+  if (argv[0])
+    badusage(_("unknown command '%s'"), argv[0]);
+
+  return showsccs(true);
+}
+
+static int
+showleaves(const char *const *argv)
+{
+  if (argv[0])
+    badusage(_("unknown command '%s'"), argv[0]);
+
+  return showsccs(false);
 }
 
 static void
@@ -761,6 +791,7 @@ usage(const struct cmdinfo *ci, const char *value)
 
   printf(_(
 "Commands:\n"
+"      --cycles                     Show all dependency cycles found.\n"
 "  -?, --help                       Show this help message.\n"
 "      --version                    Show the version.\n"
 "\n"));
@@ -792,6 +823,7 @@ usage(const struct cmdinfo *ci, const char *value)
 static const char printforhelp[] = N_("Use --help for help.");
 
 static const struct cmdinfo cmdinfos[]= {
+  ACTION("cycles", 0, 2, showcycles),
   { "admindir",      0,  1,  NULL,  &admindir,      NULL,            0,  NULL,  NULL },
   { "root",          0,  1,  NULL,  NULL,           set_root,        0,  NULL,  NULL },
   { "no-pager",      0,  0,  NULL,  NULL,           set_no_pager,    0,  NULL,  NULL },
@@ -811,13 +843,14 @@ int main(int argc, const char *const *argv)
   dpkg_locales_init(PACKAGE);
   dpkg_program_init("dpkg-leaves");
   dpkg_options_parse(&argv, cmdinfos, printforhelp);
-  if (argv[0])
-    badusage(_("unknown command '%s'"), argv[0]);
 
   instdir = dpkg_fsys_set_dir(instdir);
   admindir = dpkg_db_set_dir(admindir);
 
-  ret = showleaves();
+  if (cipaction)
+    ret = cipaction->action(argv);
+  else
+    ret = showleaves(argv);
 
   dpkg_program_done();
   dpkg_locales_done();
@@ -825,4 +858,4 @@ int main(int argc, const char *const *argv)
   return !!ret;
 }
 
-/* vim: set ts=2 sw=2 et */
+/* vim: set ts=2 sw=2 et: */

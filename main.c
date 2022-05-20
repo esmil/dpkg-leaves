@@ -575,11 +575,10 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
   int N = rgraph->n_nodes;
   int *stack = m_malloc(N * sizeof(stack[0]));
   int *estack = m_malloc(N * sizeof(estack[0]));
-  int *rindex = m_calloc(N, sizeof(rindex[0]));
-  unsigned long *nonroot = bitmap_new(N);
+  unsigned int *rindex = m_calloc(N, sizeof(rindex[0]));
   unsigned long *sccredges = bitmap_new(N);
+  unsigned int idx, uidx;
   int r = N;
-  int idx = 0;
   int top = 0;
   int i, j, u, v;
 
@@ -591,7 +590,8 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
 
     u = i;
     j = 0;
-    rindex[u] = ++idx;
+    idx = 2;
+    rindex[u] = idx;
     while (true) {
       v = graph_edges_from(rgraph, u)[j++];
       if (v >= 0) {
@@ -600,17 +600,16 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
           stack[top++] = u;
           u = v;
           j = 0;
-          rindex[u] = ++idx;
-        } else if (rindex[v] < rindex[u]) {
-          rindex[u] = rindex[v];
-          bitmap_setbit(nonroot, u);
-        }
+          idx += 2;
+          rindex[u] = idx;
+        } else if (rindex[v] < rindex[u])
+          rindex[u] = rindex[v] | 1U;
         continue;
       }
 
       stack[--r] = u;
-      if (!bitmap_has(nonroot, u)) {
-        int uidx = rindex[u];
+      uidx = rindex[u];
+      if (!(uidx & 1U)) {
         int scc = r;
 
         do {
@@ -618,7 +617,7 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
           int w;
 
           v = stack[r++];
-          rindex[v] = N;
+          rindex[v] = ~0U;
           edges = graph_edges_from(rgraph, v);
           for (w = *edges++; w >= 0; w = *edges++)
             bitmap_setbit(sccredges, w);
@@ -638,15 +637,12 @@ tarjan(struct leaves *leaves, const struct graph *rgraph)
       v = u;
       u = stack[--top];
       j = estack[top];
-      if (rindex[v] < rindex[u]) {
-        rindex[u] = rindex[v];
-        bitmap_setbit(nonroot, u);
-      }
+      if (rindex[v] < rindex[u])
+        rindex[u] = rindex[v] | 1U;
     }
   }
 
   bitmap_free(sccredges);
-  bitmap_free(nonroot);
   free(rindex);
   free(estack);
   free(stack);

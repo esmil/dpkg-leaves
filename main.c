@@ -477,7 +477,7 @@ static void DPKG_ATTR_UNUSED
 kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
   struct graph graph;
-  int N = rgraph->n_nodes;
+  const int N = rgraph->n_nodes;
   int *rstack = m_malloc(N * sizeof(rstack[0]));
   int *stack = m_malloc(N * sizeof(stack[0]));
   unsigned long *tag = bitmap_new(N);
@@ -579,7 +579,7 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 static void
 tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
-  int N = rgraph->n_nodes;
+  const int N = rgraph->n_nodes;
   int *stack = m_malloc(N * sizeof(stack[0]));
   int *estack = m_malloc(N * sizeof(estack[0]));
   unsigned int *rindex = m_calloc(N, sizeof(rindex[0]));

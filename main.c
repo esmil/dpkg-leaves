@@ -47,7 +47,7 @@ static const char *admindir;
 static const char *instdir;
 static int leavespriority;
 static int leavesedges = 2;
-static const char *leavesformat = "${binary:Package;-35} ${Priority;-10} ${Version}\n";
+static const char *leavesformat;
 
 static inline int
 bitmap_end(int len)
@@ -660,30 +660,80 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   free(stack);
 }
 
+static struct pkg_format_node *
+get_format(struct varbuf *vb, struct leaves *leaves, struct pkg_array *array)
+{
+  struct dpkg_error err;
+  struct pkg_format_node *fmt;
+  int maxwidth = 0;
+  int i, j;
+
+  if (leavesformat) {
+    fmt = pkg_format_parse(leavesformat, &err);
+    goto out;
+  }
+
+  fmt = pkg_format_parse("${binary:Package}", &err);
+
+  for (i = 0; i < leaves->n_sccs; i++) {
+    const int *scc = leaves->sccs[i];
+
+    for (j = *scc++; j >= 0; j = *scc++) {
+      struct pkginfo *pkg = array->pkgs[j];
+      int len;
+
+      if (pkg->priority < leavespriority && pkg->priority >= 0)
+        continue;
+
+      pkg_format_print(vb, fmt, pkg, &pkg->installed);
+      len = strlen(varbuf_get_str(vb));
+      varbuf_reset(vb);
+
+      if (len > maxwidth)
+        maxwidth = len;
+    }
+  }
+
+  pkg_format_free(fmt);
+  varbuf_printf(vb, "${binary:Package;-%d} ${Priority;-10} ${Version}", maxwidth);
+  fmt = pkg_format_parse(varbuf_get_str(vb), &err);
+  varbuf_reset(vb);
+
+out:
+  if (!fmt) {
+    notice(_("error in format: %s"), err.str);
+    dpkg_error_destroy(&err);
+  }
+  return fmt;
+}
+
 static int
 showsccs(bool allcycles)
 {
-  struct dpkg_error err;
   struct pkg_array array;
   struct graph rgraph;
   struct leaves leaves;
+  struct varbuf vb;
   struct pkg_format_node *fmt;
   struct pager *pager;
   bool format_needs_db_fsys;
   int i, j;
-
-  fmt = pkg_format_parse(leavesformat, &err);
-  if (!fmt) {
-    notice(_("error in format: %s"), err.str);
-    dpkg_error_destroy(&err);
-    return 1;
-  }
-  format_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
+  int ret = 0;
 
   modstatdb_open(msdbrw_readonly);
   pkg_array_init_from_hash(&array);
   graph_build_rdepends(&rgraph, &array);
   tarjan(&leaves, &rgraph, allcycles);
+
+  varbuf_init(&vb, 64);
+
+  fmt = get_format(&vb, &leaves, &array);
+  if (!fmt) {
+    ret = 1;
+    goto out;
+  }
+  format_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
+
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   pager = pager_spawn(_("showing leaves list on pager"));
@@ -701,8 +751,11 @@ showsccs(bool allcycles)
       if (format_needs_db_fsys)
         ensure_packagefiles_available(pkg);
 
-      printf("%c ", mark);
-      pkg_format_show(fmt, pkg, &pkg->installed);
+      varbuf_add_char(&vb, mark);
+      varbuf_add_char(&vb, ' ');
+      pkg_format_print(&vb, fmt, pkg, &pkg->installed);
+      puts(varbuf_get_str(&vb));
+      varbuf_reset(&vb);
       mark = ' ';
     }
   }
@@ -712,12 +765,14 @@ showsccs(bool allcycles)
 
   pager_reap(pager);
 
+out:
+  varbuf_destroy(&vb);
   leaves_destroy(&leaves);
   graph_destroy(&rgraph);
   pkg_array_destroy(&array);
   modstatdb_shutdown();
   pkg_format_free(fmt);
-  return 0;
+  return ret;
 }
 
 static int

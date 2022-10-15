@@ -37,20 +37,19 @@ SFLAGS    = --strip-all --strip-unneeded
 
 CC        = $(CROSS_COMPILE)gcc
 STRIP     = $(CROSS_COMPILE)strip
-#PKGCONFIG = $(CROSS_COMPILE)pkg-config
+PKGCONFIG = $(CROSS_COMPILE)pkg-config
 MKDIR_P   = mkdir -p
 RM_F      = rm -f
 RMDIR     = rmdir
 echo      = @echo '$1'
 
-ifneq ($(PKGCONFIG),)
 LIBDPKG   = libdpkg
 CFLAGS   += $(shell $(PKGCONFIG) --cflags $(LIBDPKG))
 LIBS     += $(shell $(PKGCONFIG) --libs $(LIBDPKG))
-else
-LIBDPKG   = -ldpkg
-LIBS     += $(LIBDPKG)
-endif
+
+HAVE := $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo '-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS')
+HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo '-DHAVE_PKG_FORMAT_PRINT')
+CPPFLAGS += $(HAVE)
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))
 clean   = $O/*.d $O/*.o $(TARGET)

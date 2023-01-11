@@ -43,8 +43,6 @@ static inline void dpkg_locales_done(void) {}
 #define BITS_PER_LONG (8 * sizeof(unsigned long))
 #define MULTIPLE_PROVIDERS ((struct pkginfo *)1U)
 
-static const char *admindir;
-static const char *instdir;
 static int leavespriority;
 static int leavesedges = 2;
 static const char *leavesformat;
@@ -806,12 +804,26 @@ showleaves(const char *const *argv)
   return showsccs(false);
 }
 
+#ifndef HAVE_SET_ROOT
+static void
+set_admindir(const struct cmdinfo *cip, const char *value)
+{
+  dpkg_db_set_dir(value);
+}
+
 static void
 set_root(const struct cmdinfo *cip, const char *value)
 {
-  instdir = dpkg_fsys_set_dir(value);
-  admindir = dpkg_fsys_get_path(ADMINDIR);
+  char *db_dir;
+
+  /* Initialize the root directory. */
+  dpkg_fsys_set_dir(value);
+
+  /* Set the database directory based on the new root directory. */
+  db_dir = dpkg_fsys_get_path(ADMINDIR);
+  dpkg_db_set_dir(db_dir);
 }
+#endif
 
 static void
 set_no_pager(const struct cmdinfo *ci, const char *value)
@@ -892,7 +904,7 @@ static const char printforhelp[] = N_("Use --help for help.");
 
 static const struct cmdinfo cmdinfos[]= {
   ACTION("cycles", 0, 2, showcycles),
-  { "admindir",      0,  1,  NULL,  &admindir,      NULL,            0,  NULL,  NULL },
+  { "admindir",      0,  1,  NULL,  NULL,           set_admindir,    0,  NULL,  NULL },
   { "root",          0,  1,  NULL,  NULL,           set_root,        0,  NULL,  NULL },
   { "no-pager",      0,  0,  NULL,  NULL,           set_no_pager,    0,  NULL,  NULL },
   { "priority",    'p',  1,  NULL,  NULL,           set_priority,    0,  NULL,  NULL },
@@ -911,9 +923,6 @@ int main(int argc, const char *const *argv)
   dpkg_locales_init(PACKAGE);
   dpkg_program_init("dpkg-leaves");
   dpkg_options_parse(&argv, cmdinfos, printforhelp);
-
-  instdir = dpkg_fsys_set_dir(instdir);
-  admindir = dpkg_db_set_dir(admindir);
 
   if (cipaction)
     ret = cipaction->action(argv);

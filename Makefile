@@ -47,8 +47,15 @@ LIBDPKG   = libdpkg
 CFLAGS   += $(shell $(PKGCONFIG) --cflags $(LIBDPKG))
 LIBS     += $(shell $(PKGCONFIG) --libs $(LIBDPKG))
 
+ifeq ($(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes),yes)
+LIBMD     = libmd
+CFLAGS   += $(shell $(PKGCONFIG) --cflags $(LIBMD))
+LIBS     += $(shell $(PKGCONFIG) --libs $(LIBMD))
+endif
+
 HAVE := $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo '-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS')
 HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo '-DHAVE_PKG_FORMAT_PRINT')
+HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo '-DHAVE_SET_ROOT')
 CPPFLAGS += $(HAVE)
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))

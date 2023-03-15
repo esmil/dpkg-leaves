@@ -699,6 +699,14 @@ out:
   return fmt;
 }
 
+#ifndef HAVE_PKG_FORMAT_NEEDS_DB_FSYS
+static bool
+pkg_format_needs_db_fsys(struct pkg_format_node *fmt)
+{
+  return false;
+}
+#endif
+
 static int
 showsccs(bool allcycles)
 {
@@ -710,9 +718,7 @@ showsccs(bool allcycles)
 #endif
   struct pkg_format_node *fmt;
   struct pager *pager;
-#ifdef HAVE_PKG_FORMAT_NEEDS_DB_FSYS
   bool format_needs_db_fsys;
-#endif
   int i, j;
   int ret = 0;
 
@@ -726,9 +732,7 @@ showsccs(bool allcycles)
     ret = 1;
     goto out;
   }
-#ifdef HAVE_PKG_FORMAT_NEEDS_DB_FSYS
   format_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
-#endif
 
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
@@ -748,10 +752,8 @@ showsccs(bool allcycles)
       if (pkg->priority < leavespriority && pkg->priority >= 0)
         continue;
 
-#ifdef HAVE_PKG_FORMAT_NEEDS_DB_FSYS
       if (format_needs_db_fsys)
         ensure_packagefiles_available(pkg);
-#endif
 
 #ifdef HAVE_PKG_FORMAT_PRINT
       varbuf_add_char(&vb, mark);

@@ -726,6 +726,7 @@ showsccs(bool allcycles)
   pkg_array_init_from_hash(&array);
   graph_build_rdepends(&rgraph, &array);
   tarjan(&leaves, &rgraph, allcycles);
+  leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   fmt = get_format(&leaves, &array);
   if (!fmt) {
@@ -733,8 +734,6 @@ showsccs(bool allcycles)
     goto out;
   }
   format_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
-
-  leaves_sort(&leaves, leaves_sorter_by_first_node);
 
 #ifdef HAVE_PKG_FORMAT_PRINT
   varbuf_init(&vb, 64);
@@ -775,16 +774,16 @@ showsccs(bool allcycles)
   m_output(stderr, _("<standard error>"));
 
   pager_reap(pager);
-
-out:
 #ifdef HAVE_PKG_FORMAT_PRINT
   varbuf_destroy(&vb);
 #endif
+  pkg_format_free(fmt);
+
+out:
   leaves_destroy(&leaves);
   graph_destroy(&rgraph);
   pkg_array_destroy(&array);
   modstatdb_shutdown();
-  pkg_format_free(fmt);
   return ret;
 }
 

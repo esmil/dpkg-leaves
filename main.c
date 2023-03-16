@@ -707,15 +707,38 @@ pkg_format_needs_db_fsys(struct pkg_format_node *fmt)
 }
 #endif
 
+#ifdef HAVE_PKG_FORMAT_PRINT
+static void
+showpkg(struct varbuf *vb, struct pkg_format_node *fmt,
+        struct pkginfo *pkg, char mark)
+{
+  varbuf_add_char(vb, mark);
+  varbuf_add_char(vb, ' ');
+  pkg_format_print(vb, fmt, pkg, &pkg->installed);
+  puts(varbuf_get_str(vb));
+  varbuf_reset(vb);
+}
+#else
+#define varbuf_init(vb, size) ((void)(vb))
+#define varbuf_destroy(vb)    ((void)(vb))
+#define showpkg(vb, fmt, pkg, mark) showpkg_(fmt, pkg, mark)
+static void
+showpkg_(struct pkg_format_node *fmt, struct pkginfo *pkg, char mark)
+{
+  putchar(mark);
+  putchar(' ');
+  pkg_format_show(fmt, pkg, &pkg->installed);
+  putchar('\n');
+}
+#endif
+
 static int
 showsccs(bool allcycles)
 {
   struct pkg_array array;
   struct graph rgraph;
   struct leaves leaves;
-#ifdef HAVE_PKG_FORMAT_PRINT
   struct varbuf vb;
-#endif
   struct pkg_format_node *fmt;
   struct pager *pager;
   bool format_needs_db_fsys;
@@ -735,10 +758,7 @@ showsccs(bool allcycles)
   }
   format_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
 
-#ifdef HAVE_PKG_FORMAT_PRINT
   varbuf_init(&vb, 64);
-#endif
-
   pager = pager_spawn(_("showing leaves list on pager"));
 
   for (i = 0; i < leaves.n_sccs; i++) {
@@ -754,18 +774,7 @@ showsccs(bool allcycles)
       if (format_needs_db_fsys)
         ensure_packagefiles_available(pkg);
 
-#ifdef HAVE_PKG_FORMAT_PRINT
-      varbuf_add_char(&vb, mark);
-      varbuf_add_char(&vb, ' ');
-      pkg_format_print(&vb, fmt, pkg, &pkg->installed);
-      puts(varbuf_get_str(&vb));
-      varbuf_reset(&vb);
-#else
-      putchar(mark);
-      putchar(' ');
-      pkg_format_show(fmt, pkg, &pkg->installed);
-      putchar('\n');
-#endif
+      showpkg(&vb, fmt, pkg, mark);
       mark = ' ';
     }
   }
@@ -774,9 +783,7 @@ showsccs(bool allcycles)
   m_output(stderr, _("<standard error>"));
 
   pager_reap(pager);
-#ifdef HAVE_PKG_FORMAT_PRINT
   varbuf_destroy(&vb);
-#endif
   pkg_format_free(fmt);
 
 out:

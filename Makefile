@@ -22,40 +22,41 @@ PACKAGE_RELEASE  = 0.1
 DPKGLEAVES       = dpkg-leaves
 ADMINDIR         = /var/lib/dpkg
 
-O         = .
-S        := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-TARGET    = $O/$(DPKGLEAVES)
+O           = .
+S          := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+TARGET      = $O/$(DPKGLEAVES)
 
-ARCHFLAGS =
-OPT       = -O2
-DEPENDS   = -MMD -MP
-WARNINGS  = -Wall -Wextra -Wshadow -Wpointer-arith -Wformat=2 -Wformat-truncation=2 -Wundef -Wno-unused-parameter
-CPPFLAGS  = $(foreach V,PACKAGE PACKAGE_RELEASE DPKGLEAVES ADMINDIR,-D'$V="$($V)"')
-CFLAGS    = $(ARCHFLAGS) $(OPT) -ggdb -pipe $(DEPENDS) $(WARNINGS) $(CPPFLAGS)
-LDFLAGS   = $(ARCHFLAGS) $(OPT)
-SFLAGS    = --strip-all --strip-unneeded
+CC          = $(CROSS_COMPILE)gcc
+STRIP       = $(CROSS_COMPILE)strip
+PKGCONFIG   = $(CROSS_COMPILE)pkg-config
+MKDIR_P     = mkdir -p
+RM_F        = rm -f
+RMDIR       = rmdir
+echo        = @echo '$1'
 
-CC        = $(CROSS_COMPILE)gcc
-STRIP     = $(CROSS_COMPILE)strip
-PKGCONFIG = $(CROSS_COMPILE)pkg-config
-MKDIR_P   = mkdir -p
-RM_F      = rm -f
-RMDIR     = rmdir
-echo      = @echo '$1'
+ARCHFLAGS   =
+OPT         = -O2
+DEPENDS     = -MMD -MP
+WARNINGS    = -Wall -Wextra -Wshadow -Wpointer-arith -Wformat=2 -Wformat-truncation=2 -Wundef -Wno-unused-parameter
+CFLAGS     ?= $(ARCHFLAGS) $(OPT) -ggdb -pipe $(WARNINGS)
+CFLAGS     += $(DEPENDS)
+CPPFLAGS   += $(foreach V,PACKAGE PACKAGE_RELEASE DPKGLEAVES ADMINDIR,-D'$V="$($V)"')
+LDFLAGS    ?= $(ARCHFLAGS) $(OPT)
+SFLAGS      = --strip-all --strip-unneeded
 
-LIBDPKG   = libdpkg
-CFLAGS   += $(shell $(PKGCONFIG) --cflags $(LIBDPKG))
-LIBS     += $(shell $(PKGCONFIG) --libs $(LIBDPKG))
-
-ifeq ($(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes),yes)
-LIBMD     = libmd
-CFLAGS   += $(shell $(PKGCONFIG) --cflags $(LIBMD))
-LIBS     += $(shell $(PKGCONFIG) --libs $(LIBMD))
-endif
+LIBDPKG     = libdpkg
+CFLAGS     += $(shell $(PKGCONFIG) --cflags $(LIBDPKG))
+LIBS       += $(shell $(PKGCONFIG) --libs $(LIBDPKG))
 
 HAVE := $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo '-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS')
 HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo '-DHAVE_PKG_FORMAT_PRINT')
-HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo '-DHAVE_SET_ROOT')
+ifeq ($(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes),yes)
+LIBMD       = libmd
+CFLAGS     += $(shell $(PKGCONFIG) --cflags $(LIBMD))
+LIBS       += $(shell $(PKGCONFIG) --libs $(LIBMD))
+HAVE       += -DHAVE_SET_ROOT
+endif
+
 CPPFLAGS += $(HAVE)
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))
@@ -87,7 +88,7 @@ $(TARGET): $(objects)
 
 $O/%.o: $S/%.c $(MAKEFILE_LIST) | $O/
 	$(call echo,  CC    $<)
-	$Q$(CC) -o $@ $(CFLAGS) -c $<
+	$Q$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
 
 $O/:
 	$(call echo,  MKDIR $@)

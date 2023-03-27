@@ -28,6 +28,8 @@ S          := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 CC          = $(CROSS_COMPILE)gcc
 STRIP       = $(CROSS_COMPILE)strip
 PKGCONFIG   = $(CROSS_COMPILE)pkg-config
+SED         = sed
+GZIP        = gzip -9c
 INSTALL     = install
 MKDIR_P     = mkdir -p
 RM_F        = rm -f
@@ -38,6 +40,9 @@ runonce     = $(eval $1 := $$(shell $2))$($1)
 prefix      = /usr/local
 exec_prefix = $(prefix)
 bindir      = $(exec_prefix)/bin
+datarootdir = $(prefix)/share
+mandir      = $(datarootdir)/man
+man1dir     = $(mandir)/man1
 
 LIBDPKG        = libdpkg
 LIBDPKG_CFLAGS = $(call runonce,LIBDPKG_CFLAGS,$(PKGCONFIG) --cflags $(LIBDPKG))
@@ -94,7 +99,7 @@ strip: $O/$(DPKGLEAVES)
 	$(call echo,  STRIP $<)
 	$Q$(STRIP) $(SFLAGS) $<
 
-install: $(DESTDIR)$(bindir)/$(DPKGLEAVES)
+install: $(DESTDIR)$(bindir)/$(DPKGLEAVES) $(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz
 
 $O/$(DPKGLEAVES): $(objects)
 	$(call echo,  CCLD  $@)
@@ -111,6 +116,13 @@ $O/:
 $(DESTDIR)$(bindir)/$(DPKGLEAVES): $O/$(DPKGLEAVES) | $(DESTDIR)$(bindir)/
 	$(call echo,  INSTALL $@)
 	$Q$(INSTALL) -m755 $< $@
+
+$(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz: $S/dpkg-leaves.1.in | $(DESTDIR)$(man1dir)/
+	$(call echo,  INSTALL $@)
+	$Q$(SED) \
+	  -e 's|@ADMINDIR@|$(ADMINDIR)|g' \
+	  -e 's|@DPKGLEAVES@|$(DPKGLEAVES)|g' \
+	  $< | $(GZIP) | $(INSTALL) -m644 /dev/stdin $@
 
 $(DESTDIR)%/:
 	$(call echo,  INSTALL $@)

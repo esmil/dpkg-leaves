@@ -1,6 +1,6 @@
 # dpkg-leaves - show packages not required by any other
 #
-# Copyright (c) 2022, Emil Renner Berthing
+# Copyright (c) 2022 - 2023 Emil Renner Berthing
 #
 # This is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,15 +24,28 @@ ADMINDIR         = /var/lib/dpkg
 
 O           = .
 S          := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-TARGET      = $O/$(DPKGLEAVES)
 
 CC          = $(CROSS_COMPILE)gcc
 STRIP       = $(CROSS_COMPILE)strip
 PKGCONFIG   = $(CROSS_COMPILE)pkg-config
+INSTALL     = install
 MKDIR_P     = mkdir -p
 RM_F        = rm -f
 RMDIR       = rmdir
 echo        = @echo '$1'
+runonce     = $(eval $1 := $$(shell $2))$($1)
+
+prefix      = /usr/local
+exec_prefix = $(prefix)
+bindir      = $(exec_prefix)/bin
+
+LIBDPKG        = libdpkg
+LIBDPKG_CFLAGS = $(call runonce,LIBDPKG_CFLAGS,$(PKGCONFIG) --cflags $(LIBDPKG))
+LIBDPKG_LIBS   = $(call runonce,LIBDPKG_LIBS,$(PKGCONFIG) --libs $(LIBDPKG))
+
+LIBMD          = libmd
+LIBMD_CFLAGS   = $(call runonce,LIBMD_CFLAGS,$(PKGCONFIG) --cflags $(LIBMD))
+LIBMD_LIBS     = $(call runonce,LIBMD_LIBS,$(PKGCONFIG) --libs $(LIBMD))
 
 ARCHFLAGS   =
 OPT         = -O2
@@ -44,23 +57,22 @@ CPPFLAGS   += $(foreach V,PACKAGE PACKAGE_RELEASE DPKGLEAVES ADMINDIR,-D'$V="$($
 LDFLAGS    ?= $(ARCHFLAGS) $(OPT)
 SFLAGS      = --strip-all --strip-unneeded
 
-LIBDPKG     = libdpkg
-CFLAGS     += $(shell $(PKGCONFIG) --cflags $(LIBDPKG))
-LIBS       += $(shell $(PKGCONFIG) --libs $(LIBDPKG))
+CFLAGS     += $(LIBDPKG_CFLAGS)
+LIBS       += $(LIBDPKG_LIBS)
 
-HAVE := $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo '-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS')
-HAVE += $(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo '-DHAVE_PKG_FORMAT_PRINT')
-ifeq ($(shell $(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes),yes)
-LIBMD       = libmd
-CFLAGS     += $(shell $(PKGCONFIG) --cflags $(LIBMD))
-LIBS       += $(shell $(PKGCONFIG) --libs $(LIBMD))
-HAVE       += -DHAVE_SET_ROOT
-endif
+V_1_20_0    = $(call runonce,V_1_20_0,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo yes)
+CPPFLAGS   += $(if $(V_1_20_0),-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS)
 
-CPPFLAGS += $(HAVE)
+V_1_21_2    = $(call runonce,V_1_21_2,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo yes)
+CPPFLAGS   += $(if $(V_1_21_2),-DHAVE_PKG_FORMAT_PRINT)
+
+V_1_21_10   = $(call runonce,V_1_21_10,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes)
+CFLAGS     += $(if $(V_1_21_10),$(LIBMD_CFLAGS))
+CPPFLAGS   += $(if $(V_1_21_10),-DHAVE_SET_ROOT)
+LIBS       += $(if $(V_1_21_10),$(LIBMD_LIBS))
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))
-clean   = $O/*.d $O/*.o $(TARGET)
+clean   = $O/*.d $O/*.o $O/$(DPKGLEAVES)
 
 # use make V=1 to see raw commands or make -s for silence
 ifeq ($V$(findstring s,$(word 1,$(MAKEFLAGS))),)
@@ -70,19 +82,21 @@ echo =
 endif
 
 #.SECONDEXPANSION:
-.PHONY: all static strip clean
+.PHONY: all static strip install clean
 .PRECIOUS: $O/%.o
 
-all: $(TARGET)
+all: $O/$(DPKGLEAVES)
 
 static: LDFLAGS += -static
-static: $(TARGET)
+static: $O/$(DPKGLEAVES)
 
-strip: $(TARGET)
+strip: $O/$(DPKGLEAVES)
 	$(call echo,  STRIP $<)
 	$Q$(STRIP) $(SFLAGS) $<
 
-$(TARGET): $(objects)
+install: $(DESTDIR)$(bindir)/$(DPKGLEAVES)
+
+$O/$(DPKGLEAVES): $(objects)
 	$(call echo,  CCLD  $@)
 	$Q$(CC) -o $@ $(LDFLAGS) $^ $(LIBS)
 
@@ -93,6 +107,14 @@ $O/%.o: $S/%.c $(MAKEFILE_LIST) | $O/
 $O/:
 	$(call echo,  MKDIR $@)
 	$Q$(MKDIR_P) $@
+
+$(DESTDIR)$(bindir)/$(DPKGLEAVES): $O/$(DPKGLEAVES) | $(DESTDIR)$(bindir)/
+	$(call echo,  INSTALL $@)
+	$Q$(INSTALL) -m755 $< $@
+
+$(DESTDIR)%/:
+	$(call echo,  INSTALL $@)
+	$Q$(INSTALL) -dm755 $@
 
 clean:
 	$(call echo,  RM    $(clean:./%=%))

@@ -102,6 +102,25 @@ bitmap_clear(unsigned long *bitmap, int len)
   memset(bitmap, 0, bitmap_end(len) * sizeof(bitmap[0]));
 }
 
+static void
+pkg_array_init(struct pkg_array *array, size_t size)
+{
+  array->n_pkgs = 0;
+  array->pkgs = m_malloc(size * sizeof(array->pkgs[0]));
+}
+
+static void
+pkg_array_push(struct pkg_array *array, struct pkginfo *pkg)
+{
+  array->pkgs[array->n_pkgs++] = pkg;
+}
+
+static void
+pkg_array_reset(struct pkg_array *array)
+{
+  array->n_pkgs = 0;
+}
+
 static int
 pkg_sorter_by_nonambig_name_arch_installed_first(const void *a, const void *b)
 {
@@ -113,58 +132,6 @@ pkg_sorter_by_nonambig_name_arch_installed_first(const void *a, const void *b)
     return ret;
 
   return pkg_sorter_by_nonambig_name_arch(a, b);
-}
-
-static int
-pkg_array_index_of(struct pkg_array *array, struct pkginfo *pkg)
-{
-  int i;
-
-  for (i = 0; i < array->n_pkgs; i++) {
-    if (array->pkgs[i] == pkg)
-      return i;
-  }
-  return -1;
-}
-
-struct dep_array {
-  int n_deps;
-  struct dependency **deps;
-};
-
-static void
-dep_array_destroy(struct dep_array *array)
-{
-  free(array->deps);
-}
-
-static int
-dep_array_index_of(struct dep_array *array, struct dependency *dep)
-{
-  int i = 0;
-  int j = array->n_deps;
-
-  while (i != j) {
-    int m = (i + j) / 2;
-    struct dependency *mid = array->deps[m];
-
-    if (dep == mid)
-      return m;
-    if (dep < mid)
-      j = m;
-    else
-      i = m + 1;
-  }
-  return -1;
-}
-
-static int
-dep_sorter_by_pointer(const void *a, const void *b)
-{
-  const struct dependency *x = *(const struct dependency *const *)a;
-  const struct dependency *y = *(const struct dependency *const *)b;
-
-  return (x < y) ? -1 : (x > y);
 }
 
 static bool
@@ -179,58 +146,6 @@ dep_is_valid_graph_edge(struct dependency *dep)
       return true;
   }
   return false;
-}
-
-static struct pkginfo *
-pkg_installed_provider(struct pkginfo *pkg)
-{
-  struct pkginfo *ret = NULL;
-  struct deppossi *possi;
-
-  if (pkg->status != PKG_STAT_NOTINSTALLED)
-    ret = pkg;
-
-  for (possi = pkg->set->depended.installed; possi; possi = possi->rev_next) {
-    struct dependency *dep = possi->up;
-    struct pkginfo *ppkg;
-
-    if (dep->type != dep_provides)
-      continue;
-
-    ppkg = dep->up;
-    if (ppkg->status == PKG_STAT_NOTINSTALLED)
-      continue;
-
-    if (ret)
-      return MULTIPLE_PROVIDERS;
-
-    ret = ppkg;
-  }
-
-  return ret;
-}
-
-struct edge {
-  int u;
-  int v;
-};
-
-static int
-edge_sorter_by_nodes_invalid_last(const void *a, const void *b)
-{
-  const struct edge *x = a;
-  const struct edge *y = b;
-  int ret;
-
-  ret = (int)(x->u < 0 || x->v < 0) - (int)(y->u < 0 || y->v < 0);
-  if (ret)
-    return ret;
-
-  ret = x->u - y->u;
-  if (ret)
-    return ret;
-
-  return x->v - y->v;
 }
 
 struct graph {
@@ -249,112 +164,6 @@ static const int *
 graph_edges_from(const struct graph *graph, int u)
 {
   return &graph->edges[graph->edges[u]];
-}
-
-static void
-graph_build_rdepends(struct graph *graph, struct pkg_array *array)
-{
-  struct dep_array deparray;
-  struct edge *edges;
-  int n_installed;
-  int i, j, k;
-
-  pkg_array_sort(array, pkg_sorter_by_nonambig_name_arch_installed_first);
-
-  deparray.n_deps = 0;
-  for (i = 0; i < array->n_pkgs; i++) {
-    struct pkginfo *pkg = array->pkgs[i];
-    struct dependency *dep;
-
-    if (pkg->status == PKG_STAT_NOTINSTALLED)
-      break;
-
-    for (dep = pkg->installed.depends; dep; dep = dep->next) {
-      if (dep_is_valid_graph_edge(dep))
-        deparray.n_deps += 1;
-    }
-  }
-  n_installed = i;
-
-  deparray.deps = m_calloc(deparray.n_deps, sizeof(deparray.deps[0]));
-  for (i = 0, j = 0; i < n_installed; i++) {
-    struct dependency *dep;
-
-    for (dep = array->pkgs[i]->installed.depends; dep; dep = dep->next) {
-      if (dep_is_valid_graph_edge(dep))
-        deparray.deps[j++] = dep;
-    }
-  }
-  qsort(deparray.deps, deparray.n_deps, sizeof(deparray.deps[0]), dep_sorter_by_pointer);
-
-  edges = m_malloc((deparray.n_deps + 1) * sizeof(edges[0]));
-  for (i = 0; i < deparray.n_deps; i++) {
-    edges[i].u = -1;
-    edges[i].v = pkg_array_index_of(array, deparray.deps[i]->up);
-  }
-  edges[i].u = -1;
-  edges[i].v = -1;
-
-  for (i = 0; i < array->n_pkgs; i++) {
-    struct pkginfo *pkg = array->pkgs[i];
-    struct pkginfo *ppkg = pkg_installed_provider(pkg);
-    struct deppossi *possi;
-    int u;
-
-    if (!ppkg)
-      continue;
-
-    u = (ppkg == MULTIPLE_PROVIDERS) ? -2 : pkg_array_index_of(array, ppkg);
-
-    for (possi = pkg->set->depended.installed; possi; possi = possi->rev_next) {
-      struct dependency *dep = possi->up;
-
-      if (!dep_is_valid_graph_edge(dep))
-        continue;
-
-      j = dep_array_index_of(&deparray, dep);
-      if (j < 0)
-        continue;
-
-      if (edges[j].u == -1)
-        edges[j].u = u;
-      else if (edges[j].u != u)
-        edges[j].u = -2;
-    }
-  }
-
-  qsort(edges, deparray.n_deps + 1, sizeof(edges[0]), edge_sorter_by_nodes_invalid_last);
-
-  graph->n_nodes = n_installed;
-  graph->n_edges = 0;
-  for (i = 0; edges[i].u >= 0; i++) {
-    if (edges[i].v != edges[i + 1].v || edges[i].u != edges[i + 1].u)
-      graph->n_edges += 1;
-  }
-  graph->edges = m_malloc((2 * graph->n_nodes + graph->n_edges) * sizeof(graph->edges[0]));
-
-  for (i = 0, j = 0, k = graph->n_nodes; i < graph->n_nodes; i++) {
-    graph->edges[i] = k;
-    for (; edges[j].u == i; j++) {
-      if (edges[j].v != edges[j + 1].v || edges[j].u != edges[j + 1].u)
-        graph->edges[k++] = edges[j].v;
-    }
-    graph->edges[k++] = -1;
-  }
-
-  /*
-  for (i = 0; i < graph->n_nodes; i++) {
-    const int *iedges = graph_edges_from(graph, i);
-
-    for (j = *iedges++; j >= 0; j = *iedges++)
-      printf("(%3d, %3d) %s -> %s\n", i, j,
-          pkg_name(array->pkgs[i], pnaw_nonambig),
-          pkg_name(array->pkgs[j], pnaw_nonambig));
-  }
-  */
-
-  free(edges);
-  dep_array_destroy(&deparray);
 }
 
 static void
@@ -390,6 +199,162 @@ graph_reverse(struct graph *rgraph, const struct graph *graph)
 
   memmove(&rgraph->edges[1], &rgraph->edges[0], (rgraph->n_nodes - 1) * sizeof(rgraph->edges[0]));
   rgraph->edges[0] = rgraph->n_nodes;
+}
+
+static void
+graph_build_depends(struct graph *graph, struct pkg_array *array)
+{
+  struct pkg_array deps;
+  int max_deps = 0;
+  int n = 0;
+  int i;
+
+  /* sort packages with installed packages first */
+  pkg_array_sort(array, pkg_sorter_by_nonambig_name_arch_installed_first);
+
+  /* estimate max number of edges pr. node and total edges */
+  for (i = 0; i < array->n_pkgs; i++) {
+    struct pkginfo *pkg = array->pkgs[i];
+    struct dependency *dep;
+    int j = 0;
+
+    if (pkg->status == PKG_STAT_NOTINSTALLED)
+      break;
+
+    for (dep = pkg->installed.depends; dep; dep = dep->next)
+      j += (int)dep_is_valid_graph_edge(dep);
+
+    if (max_deps < j)
+      max_deps = j;
+    n += j;
+  }
+
+  /* the graph will only have installed packages as nodes */
+  graph->n_nodes = i;
+  graph->edges = m_malloc((2 * graph->n_nodes + n) * sizeof(graph->edges[0]));
+
+  pkg_array_init(&deps, max_deps + 1);
+
+  /* go through each installed package */
+  for (i = 0, n = graph->n_nodes; i < graph->n_nodes; i++) {
+    struct pkginfo *pkg = array->pkgs[i];
+    struct dependency *dep;
+    int j, k;
+
+    /* and for each dependency */
+    for (dep = pkg->installed.depends; dep; dep = dep->next) {
+      struct pkginfo *res = NULL;
+      struct deppossi *possi;
+
+      /* that is a Pre-Depends, Depends or possibly Recommends */
+      if (!dep_is_valid_graph_edge(dep))
+        continue;
+
+      /* go through the different choices (foo | bar | ..) */
+      for (possi = dep->list; possi; possi = possi->next) {
+        struct pkginfo *dpkg;
+
+        /* and find the package(s) satisfying the dependency */
+        for (dpkg = &possi->ed->pkg; dpkg; dpkg = dpkg->arch_next) {
+          struct deppossi *pp;
+
+          /* it may be a direct dependency */
+          if (dpkg->status != PKG_STAT_NOTINSTALLED &&
+              versionsatisfied(&dpkg->installed, possi) &&
+              archsatisfied(&dpkg->installed, possi)) {
+            if (res == NULL)
+              res = dpkg;
+            else if (res != dpkg)
+              res = MULTIPLE_PROVIDERS;
+          }
+
+          /* or be Provided by installed packages */
+          for (pp = dpkg->set->depended.installed; pp; pp = pp->rev_next) {
+            struct dependency *pdep = pp->up;
+            struct pkginfo *ppkg = pdep->up;
+
+            if (pdep->type != dep_provides)
+              continue;
+            if (!pkg_virtual_deppossi_satisfied(possi, pp))
+              continue;
+            if (!archsatisfied(&ppkg->installed, possi))
+              continue;
+
+            if (res == NULL)
+              res = ppkg;
+            else if (res != ppkg)
+              res = MULTIPLE_PROVIDERS;
+          }
+        }
+      }
+
+      /*
+      if (res == NULL) {
+        struct varbuf vb;
+
+        varbuf_init(&vb, 128);
+        varbuf_printf(&vb, "WARNING: Nothing provides ");
+        varbufdependency(&vb, dep);
+        varbuf_printf(&vb, " needed by ");
+        varbuf_add_pkgbin_name(&vb, pkg, &pkg->installed, pnaw_nonambig);
+        puts(varbuf_get_str(&vb));
+        varbuf_destroy(&vb);
+      }
+      */
+
+      /* if the dependency is satisfied by exactly one installed package add it
+       * to the list of critical dependencies (edges) for this package (node) */
+      if (res && res != MULTIPLE_PROVIDERS && res != pkg)
+        pkg_array_push(&deps, res);
+    }
+
+    /* sort the dependencies */
+    pkg_array_sort(&deps, pkg_sorter_by_nonambig_name_arch_installed_first);
+
+    /* and add the dependencies to the graph */
+    deps.pkgs[deps.n_pkgs] = NULL;
+    graph->edges[i] = n;
+    for (j = 0, k = 0; k < deps.n_pkgs; k++) {
+      struct pkginfo *dpkg = deps.pkgs[k];
+
+      /* skipping duplicates */
+      if (dpkg == deps.pkgs[k+1])
+        continue;
+
+      while (dpkg != array->pkgs[j])
+        j++;
+
+      graph->edges[n++] = j++;
+    }
+    graph->edges[n++] = -1;
+    pkg_array_reset(&deps);
+  }
+
+  graph->n_edges = n - 2 * graph->n_nodes;
+  pkg_array_destroy(&deps);
+
+  /*
+  printf("n_nodes = %d n_edges = %d\n", graph->n_nodes, graph->n_edges);
+  for (i = 0; i < graph->n_nodes; i++) {
+    const int *iedges = graph_edges_from(graph, i);
+    int j;
+
+    for (j = *iedges++; j >= 0; j = *iedges++)
+      printf("(%4d, %4d) %s -> %s\n", i, j,
+          pkg_name(array->pkgs[i], pnaw_nonambig),
+          pkg_name(array->pkgs[j], pnaw_nonambig));
+  }
+  */
+}
+
+static void
+graph_build_rdepends(struct graph *rgraph, struct pkg_array *array)
+{
+  struct graph graph;
+
+  graph_build_depends(&graph, array);
+  graph_reverse(rgraph, &graph);
+  graph_destroy(&graph);
 }
 
 struct leaves {

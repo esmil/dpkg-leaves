@@ -121,7 +121,7 @@ $(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz: $S/dpkg-leaves.1.in | $(DESTDIR)$(man1d
 	$(call echo,  INSTALL $@)
 	$Q$(SED) \
 	  -e 's|@ADMINDIR@|$(ADMINDIR)|g' \
-	  -e 's|@DPKGLEAVES@|$(DPKGLEAVES)|g' \
+	  -e 's|@DPKGLEAVES@|$(subst -,\\-,$(DPKGLEAVES))|g' \
 	  $< | $(GZIP) | $(INSTALL) -m644 /dev/stdin $@
 
 $(DESTDIR)%/:

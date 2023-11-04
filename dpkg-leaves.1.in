@@ -1,7 +1,7 @@
 .TH @DPKGLEAVES@ 1
 
 .SH NAME
-@DPKGLEAVES@ \- show "top level" installed packages
+@DPKGLEAVES@ - show "top level" installed packages
 
 .SH SYNOPSIS
 .B @DPKGLEAVES@
@@ -50,7 +50,7 @@ Change the location of the \fBdpkg\fR database. The default location is
 .B \-\-root=\fIdirectory\fR
 Set the root directory to \fIdirectory\fR.
 .TP
-.B \-\-no-pager
+.B \-\-no\-pager
 Disables the use of any pager when showing information.
 .TP
 .B \-p, \-\-priority=\fIpriority\fR
@@ -62,7 +62,7 @@ Treat recommends as dependencies.
 .TP
 .B \-f, \-\-format=\fIformat\fR
 Print packages using an alternative format. The format string is described in
-\fBdpkg-query\fR(1).
+\fBdpkg\-query\fR(1).
 
 .SH ENVIRONMENT
 .TP
@@ -76,11 +76,11 @@ the filesystem root directory.
 .TP
 .B PAGER, DPKG_PAGER
 Sets the pager command to use, which will be executed with \(Fo$SHELL \-c\(Fc.
-If \fBSHELL\fR is not set, \(Fosh -c\(Fc will be used instead. The
+If \fBSHELL\fR is not set, \(Fosh \-c\(Fc will be used instead. The
 \fBDPKG_PAGER\fR overrides the \fBPAGER\fR environment variable.
 
 .SH SEE ALSO
-\&\fBdpkg-query\fR(1)
+\&\fBdpkg\-query\fR(1)
 
 .SH AUTHOR
-Written by Emil Renner Berthing <dpkg-leaves@esmil.dk>
+Written by Emil Renner Berthing <dpkg\-leaves@esmil.dk>

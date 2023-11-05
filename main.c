@@ -160,45 +160,65 @@ graph_destroy(struct graph *graph)
   free(graph->edges);
 }
 
-static const int *
+static int
 graph_edges_from(const struct graph *graph, int u)
 {
-  return &graph->edges[graph->edges[u]];
+  return (u == 0) ? graph->n_nodes : graph->edges[u - 1];
+}
+
+static int
+graph_edges_end(const struct graph *graph, int u)
+{
+  return graph->edges[u];
 }
 
 static void
 graph_reverse(struct graph *rgraph, const struct graph *graph)
 {
-  const int *edges;
-  int i, j;
+  int u, i;
 
   rgraph->n_nodes = graph->n_nodes;
   rgraph->n_edges = graph->n_edges;
-  rgraph->edges = m_calloc(2 * rgraph->n_nodes + rgraph->n_edges, sizeof(rgraph->edges[0]));
+  rgraph->edges = m_calloc(rgraph->n_nodes + rgraph->n_edges, sizeof(rgraph->edges[0]));
   if (rgraph->n_nodes == 0)
     return;
 
-  for (i = 0; i < graph->n_nodes; i++) {
-    edges = graph_edges_from(graph, i);
-    for (j = *edges++; j >= 0; j = *edges++)
-      rgraph->edges[j] += 1;
-  }
-  for (i = 0, j = rgraph->n_nodes; i < rgraph->n_nodes; i++) {
-    int len = rgraph->edges[i] + 1;
-    rgraph->edges[i] = j;
-    j += len;
+  for (u = 0; u < graph->n_nodes; u++) {
+    for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
+      int v = graph->edges[i];
+      rgraph->edges[v] += 1;
+    }
   }
 
-  for (i = 0; i < graph->n_nodes; i++) {
-    edges = graph_edges_from(graph, i);
-    for (j = *edges++; j >= 0; j = *edges++)
-      rgraph->edges[rgraph->edges[j]++] = i;
+  for (u = 0, i = graph_edges_from(graph, 0); u < rgraph->n_nodes; u++) {
+    int n = rgraph->edges[u];
+    rgraph->edges[u] = i;
+    i += n;
   }
-  for (i = 0; i < rgraph->n_nodes; i++)
-    rgraph->edges[rgraph->edges[i]++] = -1;
 
-  memmove(&rgraph->edges[1], &rgraph->edges[0], (rgraph->n_nodes - 1) * sizeof(rgraph->edges[0]));
-  rgraph->edges[0] = rgraph->n_nodes;
+  for (u = 0; u < graph->n_nodes; u++) {
+    for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
+      int v = graph->edges[i];
+      rgraph->edges[rgraph->edges[v]++] = u;
+    }
+  }
+}
+
+static void DPKG_ATTR_UNUSED
+graph_dump(const struct graph *graph, const struct pkg_array *array)
+{
+  int u, i;
+
+  printf("n_nodes = %d n_edges = %d\n", graph->n_nodes, graph->n_edges);
+  for (u = 0; u < graph->n_nodes; u++) {
+    for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
+      int v = graph->edges[i];
+
+      printf("(%4d, %4d) %s -> %s\n", u, v,
+          pkg_name(array->pkgs[u], pnaw_nonambig),
+          pkg_name(array->pkgs[v], pnaw_nonambig));
+    }
+  }
 }
 
 static void
@@ -206,40 +226,39 @@ graph_build_depends(struct graph *graph, struct pkg_array *array)
 {
   struct pkg_array deps;
   int max_deps = 0;
-  int n = 0;
-  int i;
+  int u, i;
 
   /* sort packages with installed packages first */
   pkg_array_sort(array, pkg_sorter_by_nonambig_name_arch_installed_first);
 
   /* estimate max number of edges pr. node and total edges */
-  for (i = 0; i < array->n_pkgs; i++) {
-    struct pkginfo *pkg = array->pkgs[i];
+  for (u = 0, i = 0; u < array->n_pkgs; u++) {
+    struct pkginfo *pkg = array->pkgs[u];
     struct dependency *dep;
-    int j = 0;
+    int n_deps = 0;
 
     if (pkg->status == PKG_STAT_NOTINSTALLED)
       break;
 
     for (dep = pkg->installed.depends; dep; dep = dep->next)
-      j += (int)dep_is_valid_graph_edge(dep);
+      n_deps += (int)dep_is_valid_graph_edge(dep);
 
-    if (max_deps < j)
-      max_deps = j;
-    n += j;
+    if (max_deps < n_deps)
+      max_deps = n_deps;
+    i += n_deps;
   }
 
   /* the graph will only have installed packages as nodes */
-  graph->n_nodes = i;
-  graph->edges = m_malloc((2 * graph->n_nodes + n) * sizeof(graph->edges[0]));
+  graph->n_nodes = u;
+  graph->edges = m_malloc((graph->n_nodes + i) * sizeof(graph->edges[0]));
 
   pkg_array_init(&deps, max_deps + 1);
 
   /* go through each installed package */
-  for (i = 0, n = graph->n_nodes; i < graph->n_nodes; i++) {
-    struct pkginfo *pkg = array->pkgs[i];
+  for (u = 0, i = graph_edges_from(graph, 0); u < graph->n_nodes; u++) {
+    struct pkginfo *pkg = array->pkgs[u];
     struct dependency *dep;
-    int j, k;
+    int v, j;
 
     /* and for each dependency */
     for (dep = pkg->installed.depends; dep; dep = dep->next) {
@@ -313,38 +332,24 @@ graph_build_depends(struct graph *graph, struct pkg_array *array)
 
     /* and add the dependencies to the graph */
     deps.pkgs[deps.n_pkgs] = NULL;
-    graph->edges[i] = n;
-    for (j = 0, k = 0; k < deps.n_pkgs; k++) {
-      struct pkginfo *dpkg = deps.pkgs[k];
+    for (j = 0, v = 0; j < deps.n_pkgs; j++) {
+      struct pkginfo *dpkg = deps.pkgs[j];
 
       /* skipping duplicates */
-      if (dpkg == deps.pkgs[k+1])
+      if (dpkg == deps.pkgs[j + 1])
         continue;
 
-      while (dpkg != array->pkgs[j])
-        j++;
+      while (dpkg != array->pkgs[v])
+        v++;
 
-      graph->edges[n++] = j++;
+      graph->edges[i++] = v++;
     }
-    graph->edges[n++] = -1;
+    graph->edges[u] = i;
     pkg_array_reset(&deps);
   }
 
-  graph->n_edges = n - 2 * graph->n_nodes;
+  graph->n_edges = i - graph->n_nodes;
   pkg_array_destroy(&deps);
-
-  /*
-  printf("n_nodes = %d n_edges = %d\n", graph->n_nodes, graph->n_edges);
-  for (i = 0; i < graph->n_nodes; i++) {
-    const int *iedges = graph_edges_from(graph, i);
-    int j;
-
-    for (j = *iedges++; j >= 0; j = *iedges++)
-      printf("(%4d, %4d) %s -> %s\n", i, j,
-          pkg_name(array->pkgs[i], pnaw_nonambig),
-          pkg_name(array->pkgs[j], pnaw_nonambig));
-  }
-  */
 }
 
 static void
@@ -431,7 +436,7 @@ naive_leaves(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
     return;
 
   for (u = 0; u < rgraph->n_nodes; u++) {
-    if (graph_edges_from(rgraph, u)[0] < 0)
+    if (graph_edges_from(rgraph, u) == graph_edges_end(rgraph, u))
       leaves_add(leaves, &u, 1);
   }
 }
@@ -447,7 +452,7 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   unsigned long *sccredges;
   int top = 0;
   int r = N;
-  int i, j, u, v;
+  int u;
 
   graph_reverse(&graph, rgraph);
 
@@ -456,21 +461,23 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
    * "on the way up" until all nodes have been pushed.
    * tag nodes as they're processed so we don't visit them more than once
    */
-  for (i = 0; i < N; i++) {
-    if (bitmap_has(tag, i))
+  for (u = 0; u < N; u++) {
+    int i;
+
+    if (bitmap_has(tag, u))
       continue;
 
-    u = i;
-    j = 0;
+    i = graph_edges_from(&graph, u);
     bitmap_setbit(tag, u);
     while (true) {
-      v = graph_edges_from(&graph, u)[j++];
-      if (v >= 0) {
+      if (i < graph_edges_end(&graph, u)) {
+        int v = graph.edges[i++];
+
         if (!bitmap_has(tag, v)) {
-          rstack[top] = j;
-          stack[top++] = u;
+          stack[top] = u;
+          rstack[top++] = i;
           u = v;
-          j = 0;
+          i = graph_edges_from(&graph, u);
           bitmap_setbit(tag, u);
         }
       } else {
@@ -478,7 +485,7 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
         if (!top)
           break;
         u = stack[--top];
-        j = rstack[top];
+        i = rstack[top];
       }
     }
   }
@@ -498,6 +505,8 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   sccredges = bitmap_new(N);
   leaves_init(leaves);
   for (; r < N; r++) {
+    int i, j;
+
     u = rstack[r];
     if (!bitmap_has(tag, u))
       continue;
@@ -506,11 +515,9 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
     bitmap_clearbit(tag, u);
     j = N;
     while (top) {
-      const int *redges;
-
       u = stack[--j] = stack[--top];
-      redges = graph_edges_from(rgraph, u);
-      for (v = *redges++; v >= 0; v = *redges++) {
+      for (i = graph_edges_from(rgraph, u); i < graph_edges_end(rgraph, u); i++) {
+        int v = rgraph->edges[i];
         bitmap_setbit(sccredges, v);
         if (bitmap_has(tag, v)) {
           stack[top++] = v;
@@ -547,29 +554,30 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   int *estack = m_malloc(N * sizeof(estack[0]));
   unsigned int *rindex = m_calloc(N, sizeof(rindex[0]));
   unsigned long *sccredges = bitmap_new(N);
-  unsigned int idx, uidx;
   int r = N;
   int top = 0;
-  int i, j, u, v;
+  int u;
 
   leaves_init(leaves);
 
-  for (i = 0; i < N; i++) {
-    if (rindex[i])
+  for (u = 0; u < N; u++) {
+    unsigned int idx, uidx;
+    int i, v, j;
+
+    if (rindex[u])
       continue;
 
-    u = i;
-    j = 0;
+    i = graph_edges_from(rgraph, u);
     idx = 2;
     rindex[u] = idx;
     while (true) {
-      v = graph_edges_from(rgraph, u)[j++];
-      if (v >= 0) {
+      if (i < graph_edges_end(rgraph, u)) {
+        v = rgraph->edges[i++];
         if (!rindex[v]) {
-          estack[top] = j;
-          stack[top++] = u;
+          stack[top] = u;
+          estack[top++] = i;
           u = v;
-          j = 0;
+          i = graph_edges_from(rgraph, u);
           idx += 2;
           rindex[u] = idx;
         } else if (rindex[v] < rindex[u])
@@ -583,19 +591,17 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
         int scc = r;
 
         do {
-          const int *edges;
-          int w;
-
           v = stack[r++];
           rindex[v] = ~0U;
-          edges = graph_edges_from(rgraph, v);
-          for (w = *edges++; w >= 0; w = *edges++)
+          for (j = graph_edges_from(rgraph, v); j < graph_edges_end(rgraph, v); j++) {
+            int w = rgraph->edges[j];
             bitmap_setbit(sccredges, w);
+          }
         } while (r < N && uidx <= rindex[stack[r]]);
 
         if (!allcycles) {
-          for (j = scc; j < r; j++)
-            bitmap_clearbit(sccredges, stack[j]);
+          for (i = scc; i < r; i++)
+            bitmap_clearbit(sccredges, stack[i]);
 
           if (bitmap_empty(sccredges, N))
             leaves_add(leaves, &stack[scc], r - scc);
@@ -611,7 +617,7 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
         break;
       v = u;
       u = stack[--top];
-      j = estack[top];
+      i = estack[top];
       if (rindex[v] < rindex[u])
         rindex[u] = rindex[v] | 1U;
     }

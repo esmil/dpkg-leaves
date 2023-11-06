@@ -150,14 +150,23 @@ dep_is_valid_graph_edge(struct dependency *dep)
 
 struct graph {
   int n_nodes;
-  int n_edges;
-  int *edges;
+  int edges[];
 };
 
-static void
-graph_destroy(struct graph *graph)
+static struct graph *
+graph_new(int nodes, int edges)
 {
-  free(graph->edges);
+  struct graph *g = m_malloc(offsetof(struct graph, edges) + (nodes + edges) * sizeof(g->edges[0]));
+
+  g->n_nodes = nodes;
+  memset(g->edges, 0, nodes * sizeof(g->edges[0]));
+  return g;
+}
+
+static void
+graph_free(struct graph *graph)
+{
+  free(graph);
 }
 
 static int
@@ -172,16 +181,20 @@ graph_edges_end(const struct graph *graph, int u)
   return graph->edges[u];
 }
 
-static void
-graph_reverse(struct graph *rgraph, const struct graph *graph)
+static int
+graph_n_edges(const struct graph *graph)
 {
+  return graph->edges[graph->n_nodes - 1];
+}
+
+static struct graph *
+graph_reverse(const struct graph *graph)
+{
+  struct graph *rgraph = graph_new(graph->n_nodes, graph_n_edges(graph));
   int u, i;
 
-  rgraph->n_nodes = graph->n_nodes;
-  rgraph->n_edges = graph->n_edges;
-  rgraph->edges = m_calloc(rgraph->n_nodes + rgraph->n_edges, sizeof(rgraph->edges[0]));
   if (rgraph->n_nodes == 0)
-    return;
+    return rgraph;
 
   for (u = 0; u < graph->n_nodes; u++) {
     for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
@@ -202,6 +215,8 @@ graph_reverse(struct graph *rgraph, const struct graph *graph)
       rgraph->edges[rgraph->edges[v]++] = u;
     }
   }
+
+  return rgraph;
 }
 
 static void DPKG_ATTR_UNUSED
@@ -209,7 +224,7 @@ graph_dump(const struct graph *graph, const struct pkg_array *array)
 {
   int u, i;
 
-  printf("n_nodes = %d n_edges = %d\n", graph->n_nodes, graph->n_edges);
+  printf("n_nodes = %d n_edges = %d\n", graph->n_nodes, graph_n_edges(graph));
   for (u = 0; u < graph->n_nodes; u++) {
     for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
       int v = graph->edges[i];
@@ -221,10 +236,11 @@ graph_dump(const struct graph *graph, const struct pkg_array *array)
   }
 }
 
-static void
-graph_build_depends(struct graph *graph, struct pkg_array *array)
+static struct graph *
+graph_build_depends(struct pkg_array *array)
 {
   struct pkg_array deps;
+  struct graph *graph;
   int max_deps = 0;
   int u, i;
 
@@ -249,8 +265,7 @@ graph_build_depends(struct graph *graph, struct pkg_array *array)
   }
 
   /* the graph will only have installed packages as nodes */
-  graph->n_nodes = u;
-  graph->edges = m_malloc((graph->n_nodes + i) * sizeof(graph->edges[0]));
+  graph = graph_new(u, i);
 
   pkg_array_init(&deps, max_deps + 1);
 
@@ -348,18 +363,18 @@ graph_build_depends(struct graph *graph, struct pkg_array *array)
     pkg_array_reset(&deps);
   }
 
-  graph->n_edges = i - graph->n_nodes;
   pkg_array_destroy(&deps);
+  return graph;
 }
 
-static void
-graph_build_rdepends(struct graph *rgraph, struct pkg_array *array)
+static struct graph *
+graph_build_rdepends(struct pkg_array *array)
 {
-  struct graph graph;
+  struct graph *graph = graph_build_depends(array);
+  struct graph *rgraph = graph_reverse(graph);
 
-  graph_build_depends(&graph, array);
-  graph_reverse(rgraph, &graph);
-  graph_destroy(&graph);
+  graph_free(graph);
+  return rgraph;
 }
 
 struct leaves {
@@ -444,7 +459,7 @@ naive_leaves(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 static void DPKG_ATTR_UNUSED
 kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 {
-  struct graph graph;
+  struct graph *graph = graph_reverse(rgraph);
   const int N = rgraph->n_nodes;
   int *rstack = m_malloc(N * sizeof(rstack[0]));
   int *stack = m_malloc(N * sizeof(stack[0]));
@@ -453,8 +468,6 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   int top = 0;
   int r = N;
   int u;
-
-  graph_reverse(&graph, rgraph);
 
   /*
    * do depth-first searches in the graph and push nodes to rstack
@@ -467,17 +480,17 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
     if (bitmap_has(tag, u))
       continue;
 
-    i = graph_edges_from(&graph, u);
+    i = graph_edges_from(graph, u);
     bitmap_setbit(tag, u);
     while (true) {
-      if (i < graph_edges_end(&graph, u)) {
-        int v = graph.edges[i++];
+      if (i < graph_edges_end(graph, u)) {
+        int v = graph->edges[i++];
 
         if (!bitmap_has(tag, v)) {
           stack[top] = u;
           rstack[top++] = i;
           u = v;
-          i = graph_edges_from(&graph, u);
+          i = graph_edges_from(graph, u);
           bitmap_setbit(tag, u);
         }
       } else {
@@ -489,7 +502,7 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
       }
     }
   }
-  graph_destroy(&graph);
+  graph_free(graph);
 
   /*
    * now searches beginning at nodes popped from rstack in the graph with all
@@ -707,7 +720,7 @@ static int
 showsccs(bool allcycles)
 {
   struct pkg_array array;
-  struct graph rgraph;
+  struct graph *rgraph;
   struct leaves leaves;
   struct varbuf vb;
   struct pkg_format_node *fmt;
@@ -718,8 +731,8 @@ showsccs(bool allcycles)
 
   modstatdb_open(msdbrw_readonly);
   pkg_array_init_from_hash(&array);
-  graph_build_rdepends(&rgraph, &array);
-  tarjan(&leaves, &rgraph, allcycles);
+  rgraph = graph_build_rdepends(&array);
+  tarjan(&leaves, rgraph, allcycles);
   leaves_sort(&leaves, leaves_sorter_by_first_node);
 
   fmt = get_format(&leaves, &array);
@@ -759,7 +772,7 @@ showsccs(bool allcycles)
 
 out:
   leaves_destroy(&leaves);
-  graph_destroy(&rgraph);
+  graph_free(rgraph);
   pkg_array_destroy(&array);
   modstatdb_shutdown();
   return ret;

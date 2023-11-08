@@ -29,7 +29,7 @@ CC          = $(CROSS_COMPILE)gcc
 STRIP       = $(CROSS_COMPILE)strip
 PKGCONFIG   = $(CROSS_COMPILE)pkg-config
 SED         = sed
-GZIP        = gzip -9c
+GZIP        = gzip -9
 INSTALL     = install
 MKDIR_P     = mkdir -p
 RM_F        = rm -f
@@ -80,7 +80,7 @@ V_1_22_7    = $(call runonce,V_1_22_7,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.22.
 CPPFLAGS   += $(if $(V_1_22_7),,-DMISSING_VARBUF_STR)
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))
-clean   = $O/*.d $O/*.o $O/$(DPKGLEAVES)
+clean   = $O/*.d $O/*.o $O/$(DPKGLEAVES) $O/$(DPKGLEAVES).1
 
 # use make V=1 to see raw commands or make -s for silence
 ifeq ($V$(findstring s,$(word 1,$(MAKEFLAGS))),)
@@ -93,7 +93,7 @@ endif
 .PHONY: all static strip install clean
 .PRECIOUS: $O/%.o
 
-all: $O/$(DPKGLEAVES)
+all: $O/$(DPKGLEAVES) $O/$(DPKGLEAVES).1
 
 static: LDFLAGS += -static
 static: $O/$(DPKGLEAVES)
@@ -112,6 +112,13 @@ $O/$(DPKGLEAVES): $(objects)
 	$(call echo,  CCLD  $@)
 	$Q$(CC) -o $@ $(LDFLAGS) $^ $(LIBS)
 
+$O/$(DPKGLEAVES).1: $S/dpkg-leaves.1.in | $O/
+	$(call echo,  GEN   $@)
+	$Q$(SED) \
+	  -e 's|@ADMINDIR@|$(ADMINDIR)|g' \
+	  -e 's|@DPKGLEAVES@|$(subst -,\\-,$(DPKGLEAVES))|g' \
+	  $< > $@
+
 $O/%.o: $S/%.c $(MAKEFILE_LIST) | $O/
 	$(call echo,  CC    $<)
 	$Q$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
@@ -124,12 +131,9 @@ $(DESTDIR)$(bindir)/$(DPKGLEAVES): $O/$(DPKGLEAVES) | $(DESTDIR)$(bindir)/
 	$(call echo,  INSTALL $@)
 	$Q$(INSTALL) -m755 $< $@
 
-$(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz: $S/dpkg-leaves.1.in | $(DESTDIR)$(man1dir)/
+$(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz: $O/$(DPKGLEAVES).1 | $(DESTDIR)$(man1dir)/
 	$(call echo,  INSTALL $@)
-	$Q$(SED) \
-	  -e 's|@ADMINDIR@|$(ADMINDIR)|g' \
-	  -e 's|@DPKGLEAVES@|$(subst -,\\-,$(DPKGLEAVES))|g' \
-	  $< | $(GZIP) | $(INSTALL) -m644 /dev/stdin $@
+	$Q$(GZIP) -c $< | $(INSTALL) -m644 /dev/stdin $@
 
 $(DESTDIR)%/:
 	$(call echo,  INSTALL $@)

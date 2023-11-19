@@ -569,24 +569,24 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   unsigned int *rindex = m_calloc(N, sizeof(rindex[0]));
   unsigned long *sccredges = bitmap_new(N);
   int r = N;
-  int top = 0;
   int u;
 
   leaves_init(leaves);
 
   for (u = 0; u < N; u++) {
     unsigned int idx, uidx;
-    int i, v, j;
+    int top, i;
 
     if (rindex[u])
       continue;
 
+    top = 0;
     i = graph_edges_from(rgraph, u);
     idx = 2;
     rindex[u] = idx;
     while (true) {
       if (i < graph_edges_end(rgraph, u)) {
-        v = rgraph->edges[i++];
+        int v = rgraph->edges[i++];
         if (!rindex[v]) {
           stack[top] = u;
           estack[top++] = i;
@@ -605,12 +605,12 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
         int scc = r;
 
         do {
-          v = stack[r++];
+          int v = stack[r++];
+          int j;
+
           rindex[v] = ~0U;
-          for (j = graph_edges_from(rgraph, v); j < graph_edges_end(rgraph, v); j++) {
-            int w = rgraph->edges[j];
-            bitmap_setbit(sccredges, w);
-          }
+          for (j = graph_edges_from(rgraph, v); j < graph_edges_end(rgraph, v); j++)
+            bitmap_setbit(sccredges, rgraph->edges[j]);
         } while (r < N && uidx <= rindex[stack[r]]);
 
         if (!allcycles) {
@@ -629,11 +629,11 @@ tarjan(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
 
       if (!top)
         break;
-      v = u;
+      uidx = rindex[u];
       u = stack[--top];
       i = estack[top];
-      if (rindex[v] < rindex[u])
-        rindex[u] = rindex[v] | 1U;
+      if (uidx < rindex[u])
+        rindex[u] = uidx | 1U;
     }
   }
 

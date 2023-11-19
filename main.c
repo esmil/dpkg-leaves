@@ -465,7 +465,6 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   int *stack = m_malloc(N * sizeof(stack[0]));
   unsigned long *tag = bitmap_new(N);
   unsigned long *sccredges;
-  int top = 0;
   int r = N;
   int u;
 
@@ -475,11 +474,12 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
    * tag nodes as they're processed so we don't visit them more than once
    */
   for (u = 0; u < N; u++) {
-    int i;
+    int top, i;
 
     if (bitmap_has(tag, u))
       continue;
 
+    top = 0;
     i = graph_edges_from(graph, u);
     bitmap_setbit(tag, u);
     while (true) {
@@ -518,38 +518,39 @@ kosaraju(struct leaves *leaves, const struct graph *rgraph, bool allcycles)
   sccredges = bitmap_new(N);
   leaves_init(leaves);
   for (; r < N; r++) {
-    int i, j;
+    int k, n, i;
 
     u = rstack[r];
     if (!bitmap_has(tag, u))
       continue;
 
-    stack[top++] = u;
+    n = 0;
+    stack[n++] = u;
     bitmap_clearbit(tag, u);
-    j = N;
-    while (top) {
-      u = stack[--j] = stack[--top];
+    for (k = 0; k < n; k++) {
+      u = stack[k];
       for (i = graph_edges_from(rgraph, u); i < graph_edges_end(rgraph, u); i++) {
         int v = rgraph->edges[i];
+
         bitmap_setbit(sccredges, v);
         if (bitmap_has(tag, v)) {
-          stack[top++] = v;
+          stack[n++] = v;
           bitmap_clearbit(tag, v);
         }
       }
     }
 
     if (!allcycles) {
-      for (i = j; i < N; i++)
-        bitmap_clearbit(sccredges, stack[i]);
+      for (k = 0; k < n; k++)
+        bitmap_clearbit(sccredges, stack[k]);
 
       if (bitmap_empty(sccredges, N))
-        leaves_add(leaves, &stack[j], N - j);
+        leaves_add(leaves, stack, n);
       else
         bitmap_clear(sccredges, N);
     } else {
-      if (N - j > 1)
-        leaves_add(leaves, &stack[j], N - j);
+      if (n > 1)
+        leaves_add(leaves, stack, n);
     }
   }
 

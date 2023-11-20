@@ -193,9 +193,6 @@ graph_reverse(const struct graph *graph)
   struct graph *rgraph = graph_new(graph->n_nodes, graph_n_edges(graph));
   int u, i;
 
-  if (rgraph->n_nodes == 0)
-    return rgraph;
-
   for (u = 0; u < graph->n_nodes; u++) {
     for (i = graph_edges_from(graph, u); i < graph_edges_end(graph, u); i++) {
       int v = graph->edges[i];
@@ -203,7 +200,7 @@ graph_reverse(const struct graph *graph)
     }
   }
 
-  for (u = 0, i = graph_edges_from(graph, 0); u < rgraph->n_nodes; u++) {
+  for (u = 0, i = graph_edges_from(graph, 0); u < graph->n_nodes; u++) {
     int n = rgraph->edges[u];
     rgraph->edges[u] = i;
     i += n;

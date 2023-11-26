@@ -184,7 +184,7 @@ graph_edges_end(const struct graph *graph, int u)
 static int
 graph_n_edges(const struct graph *graph)
 {
-  return graph->edges[graph->n_nodes - 1];
+  return graph->edges[graph->n_nodes - 1] - graph->n_nodes;
 }
 
 static struct graph *

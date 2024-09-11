@@ -328,7 +328,7 @@ graph_build_depends(struct pkg_array *array)
         varbufdependency(&vb, dep);
         varbuf_printf(&vb, " needed by ");
         varbuf_add_pkgbin_name(&vb, pkg, &pkg->installed, pnaw_nonambig);
-        puts(varbuf_get_str(&vb));
+        puts(varbuf_str(&vb));
         varbuf_destroy(&vb);
       }
       */
@@ -682,7 +682,7 @@ out:
 }
 
 #ifdef MISSING_PKG_FORMAT_NEEDS_DB_FSYS
-static bool
+static inline bool
 pkg_format_needs_db_fsys(struct pkg_format_node *fmt)
 {
   return false;
@@ -702,6 +702,15 @@ showpkg_(struct pkg_format_node *fmt, struct pkginfo *pkg, char mark)
   putchar('\n');
 }
 #else
+
+#ifdef MISSING_VARBUF_STR
+static inline const char *
+varbuf_str(struct varbuf *vb)
+{
+  return varbuf_get_str(vb);
+}
+#endif
+
 static void
 showpkg(struct varbuf *vb, struct pkg_format_node *fmt,
         struct pkginfo *pkg, char mark)
@@ -709,7 +718,7 @@ showpkg(struct varbuf *vb, struct pkg_format_node *fmt,
   varbuf_add_char(vb, mark);
   varbuf_add_char(vb, ' ');
   pkg_format_print(vb, fmt, pkg, &pkg->installed);
-  puts(varbuf_get_str(vb));
+  puts(varbuf_str(vb));
   varbuf_reset(vb);
 }
 #endif

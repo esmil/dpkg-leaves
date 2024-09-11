@@ -76,6 +76,9 @@ CPPFLAGS   += $(if $(V_1_21_10),,-DMISSING_SET_ROOT)
 CFLAGS     += $(if $(V_1_21_10),$(LIBMD_CFLAGS))
 LIBS       += $(if $(V_1_21_10),$(LIBMD_LIBS))
 
+V_1_22_7    = $(call runonce,V_1_22_7,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.22.7' && echo yes)
+CPPFLAGS   += $(if $(V_1_22_7),,-DMISSING_VARBUF_STR)
+
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))
 clean   = $O/*.d $O/*.o $O/$(DPKGLEAVES)
 

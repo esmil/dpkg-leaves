@@ -66,14 +66,14 @@ CFLAGS     += $(LIBDPKG_CFLAGS)
 LIBS       += $(LIBDPKG_LIBS)
 
 V_1_20_0    = $(call runonce,V_1_20_0,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.20.0' && echo yes)
-CPPFLAGS   += $(if $(V_1_20_0),-DHAVE_PKG_FORMAT_NEEDS_DB_FSYS)
+CPPFLAGS   += $(if $(V_1_20_0),,-DMISSING_PKG_FORMAT_NEEDS_DB_FSYS)
 
 V_1_21_2    = $(call runonce,V_1_21_2,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.2' && echo yes)
-CPPFLAGS   += $(if $(V_1_21_2),-DHAVE_PKG_FORMAT_PRINT)
+CPPFLAGS   += $(if $(V_1_21_2),,-DMISSING_PKG_FORMAT_PRINT)
 
 V_1_21_10   = $(call runonce,V_1_21_10,$(PKGCONFIG) --exists '$(LIBDPKG) >= 1.21.10' && echo yes)
+CPPFLAGS   += $(if $(V_1_21_10),,-DMISSING_SET_ROOT)
 CFLAGS     += $(if $(V_1_21_10),$(LIBMD_CFLAGS))
-CPPFLAGS   += $(if $(V_1_21_10),-DHAVE_SET_ROOT)
 LIBS       += $(if $(V_1_21_10),$(LIBMD_LIBS))
 
 objects = $(patsubst $S/%.c,$O/%.o,$(wildcard $S/*.c))

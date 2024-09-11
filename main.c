@@ -681,7 +681,7 @@ out:
   return fmt;
 }
 
-#ifndef HAVE_PKG_FORMAT_NEEDS_DB_FSYS
+#ifdef MISSING_PKG_FORMAT_NEEDS_DB_FSYS
 static bool
 pkg_format_needs_db_fsys(struct pkg_format_node *fmt)
 {
@@ -689,18 +689,7 @@ pkg_format_needs_db_fsys(struct pkg_format_node *fmt)
 }
 #endif
 
-#ifdef HAVE_PKG_FORMAT_PRINT
-static void
-showpkg(struct varbuf *vb, struct pkg_format_node *fmt,
-        struct pkginfo *pkg, char mark)
-{
-  varbuf_add_char(vb, mark);
-  varbuf_add_char(vb, ' ');
-  pkg_format_print(vb, fmt, pkg, &pkg->installed);
-  puts(varbuf_get_str(vb));
-  varbuf_reset(vb);
-}
-#else
+#ifdef MISSING_PKG_FORMAT_PRINT
 #define varbuf_init(vb, size) ((void)(vb))
 #define varbuf_destroy(vb)    ((void)(vb))
 #define showpkg(vb, fmt, pkg, mark) showpkg_(fmt, pkg, mark)
@@ -711,6 +700,17 @@ showpkg_(struct pkg_format_node *fmt, struct pkginfo *pkg, char mark)
   putchar(' ');
   pkg_format_show(fmt, pkg, &pkg->installed);
   putchar('\n');
+}
+#else
+static void
+showpkg(struct varbuf *vb, struct pkg_format_node *fmt,
+        struct pkginfo *pkg, char mark)
+{
+  varbuf_add_char(vb, mark);
+  varbuf_add_char(vb, ' ');
+  pkg_format_print(vb, fmt, pkg, &pkg->installed);
+  puts(varbuf_get_str(vb));
+  varbuf_reset(vb);
 }
 #endif
 
@@ -794,7 +794,7 @@ showleaves(const char *const *argv)
   return showsccs(false);
 }
 
-#ifndef HAVE_SET_ROOT
+#ifdef MISSING_SET_ROOT
 static void
 set_admindir(const struct cmdinfo *cip, const char *value)
 {

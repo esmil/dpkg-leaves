@@ -1,0 +1,22 @@
+---
+AlwaysBreakAfterReturnType: TopLevel
+ColumnLimit: 120
+Cpp11BracedListStyle: false
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: true
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+BreakBeforeBraces: Custom
+IndentCaseLabels: false
+IndentGotoLabels: false
+IndentWidth: 2
+SortIncludes: false
+TabWidth: 8
+UseTab: Never

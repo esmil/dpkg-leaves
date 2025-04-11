@@ -104,6 +104,10 @@ strip: $O/$(DPKGLEAVES)
 
 install: $(DESTDIR)$(bindir)/$(DPKGLEAVES) $(DESTDIR)$(man1dir)/$(DPKGLEAVES).1.gz
 
+compile_flags.txt: $(MAKEFILE_LIST)
+	$(call echo,  GEN   $@)
+	$Q{ for i in $(strip $(CPPFLAGS) $(CFLAGS)); do echo "$$i"; done; } > $@
+
 $O/$(DPKGLEAVES): $(objects)
 	$(call echo,  CCLD  $@)
 	$Q$(CC) -o $@ $(LDFLAGS) $^ $(LIBS)

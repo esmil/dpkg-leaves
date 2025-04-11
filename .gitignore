@@ -1,3 +1,4 @@
 *.d
 *.o
 dpkg-leaves
+compile_flags.txt
